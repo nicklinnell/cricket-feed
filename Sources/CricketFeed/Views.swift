@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var picking = false
     @State private var refreshing = false
     @State private var spin = 0.0
+    @State private var listHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -24,7 +25,7 @@ struct ContentView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSizeChange($0) }
     }
@@ -72,7 +73,7 @@ struct ContentView: View {
         let items = store.watchedMatches
         if store.watched.isEmpty {
             EmptyStateView(
-                symbol: "cricket.ball",
+                symbol: "figure.cricket",
                 title: "No matches yet",
                 message: "Pick the games you want to follow and their scores will show here.",
                 action: ("Pick matches", { picking = true })
@@ -89,13 +90,22 @@ struct ContentView: View {
                 action: store.lastUpdated == nil ? nil : ("Pick matches", { picking = true })
             )
         } else {
-            ForEach(items) { match in
-                MatchCard(match: match)
-                    .contextMenu {
-                        Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
-                        Button("Stop watching") { store.toggle(match) }
+            // Scrolls only once the cards would be taller than the screen allows.
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(items) { match in
+                        MatchCard(match: match)
+                            .contextMenu {
+                                Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
+                                Button("Stop watching") { store.toggle(match) }
+                            }
                     }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
+            .scrollDisabled(listHeight <= Theme.maxListHeight)
+            .scrollIndicators(.automatic)
+            .frame(height: min(max(listHeight, 1), Theme.maxListHeight))
         }
     }
 
@@ -116,7 +126,7 @@ struct ContentView: View {
             Spacer()
         }
         .font(.system(size: 10.5))
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
         .padding(.horizontal, 2)
     }
@@ -131,20 +141,20 @@ struct MatchCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 6) {
-                VStack(alignment: .leading, spacing: 1) {
-                    if !match.detail.isEmpty {
-                        Text(match.detail)
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                    }
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .center, spacing: 6) {
+                    Text(match.detail.isEmpty ? match.league : match.detail)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    StatusPill(match: match)
+                }
+                if !match.detail.isEmpty {
                     Text(match.league)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 4)
-                StatusPill(match: match)
             }
             .padding(.bottom, 2)
             ForEach(match.sides, id: \.self) { side in
@@ -152,8 +162,8 @@ struct MatchCard: View {
             }
             if !match.summary.isEmpty {
                 Text(match.summary)
-                    .font(.system(size: 11.5, weight: match.isLive ? .medium : .regular))
-                    .foregroundStyle(match.isLive ? .primary : .secondary)
+                    .font(.system(size: 11.5, weight: inPlay ? .medium : .regular))
+                    .foregroundStyle(inPlay ? .primary : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 5)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -162,9 +172,11 @@ struct MatchCard: View {
                     }
             }
         }
-        .padding(11)
+        .padding(10)
         .cardBackground()
     }
+
+    private var inPlay: Bool { MatchPhase(match) == .live }
 
     // Best guess: in live play, the only side whose score has overs in brackets is batting.
     private var battingSide: Match.Side? {
@@ -209,20 +221,28 @@ struct MatchPicker: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
                     if sections.isEmpty {
-                        EmptyStateView(
-                            symbol: "magnifyingglass",
-                            title: store.matches.isEmpty ? "No matches in the feed" : "No results",
-                            message: store.matches.isEmpty
-                                ? "Check back soon."
-                                : "Nothing matches \u{201C}\(search)\u{201D}."
-                        )
+                        if store.matches.isEmpty && store.lastUpdated == nil {
+                            EmptyStateView(
+                                symbol: store.error == nil ? "hourglass" : "wifi.slash",
+                                title: store.error == nil ? "Fetching matches" : "Can't reach the score feed",
+                                message: store.error == nil ? "One moment." : "Will keep trying every few seconds."
+                            )
+                        } else {
+                            EmptyStateView(
+                                symbol: "magnifyingglass",
+                                title: store.matches.isEmpty ? "No matches in the feed" : "No results",
+                                message: store.matches.isEmpty
+                                    ? "Check back soon."
+                                    : "Nothing matches \u{201C}\(search)\u{201D}."
+                            )
+                        }
                     }
                     ForEach(sections, id: \.title) { section in
                         Text(section.title)
                             .font(.system(size: 9.5, weight: .bold))
                             .textCase(.uppercase)
                             .kerning(0.6)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.top, section.title == sections.first?.title ? 2 : 10)
                             .padding(.bottom, 3)
@@ -234,7 +254,6 @@ struct MatchPicker: View {
                     }
                 }
             }
-            .scrollIndicators(.never)
             .frame(height: 320)
         }
         .onAppear { searchFocused = true }

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // Shared look: sizes, colours and small reusable pieces.
 enum Theme {
@@ -6,7 +7,16 @@ enum Theme {
     static let panelRadius: CGFloat = 16
     static let cardRadius: CGFloat = 11
     static let live = Color.red
-    static let paused = Color.orange
+    // Darker orange in light mode so small text stays readable.
+    static let paused = Color(nsColor: NSColor(name: nil) { a in
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? .systemOrange
+            : NSColor(srgbRed: 0.78, green: 0.38, blue: 0.0, alpha: 1)
+    })
+    static let maxListHeight: CGFloat = {
+        let h = NSScreen.main?.visibleFrame.height ?? 800
+        return max(240, h - 160)
+    }()
 }
 
 // MARK: - Score splitting
@@ -43,19 +53,37 @@ enum MatchPhase {
     case upcoming
     case finished
 
+    // Known pauses in play. Any other in-play label counts as live.
+    private static let breaks = ["lunch", "tea", "stumps", "drinks", "innings break", "rain", "delayed", "bad light", "wet outfield", "interrupted"]
+
     init(_ match: Match) {
         switch match.state {
-        case "in": self = match.stateLabel.caseInsensitiveCompare("Live") == .orderedSame ? .live : .paused
+        case "in":
+            let label = match.stateLabel.lowercased()
+            self = Self.breaks.contains { label.contains($0) } ? .paused : .live
         case "pre": self = .upcoming
         default: self = .finished
         }
     }
 }
 
-struct StatusPill: View {
-    let match: Match
+// Pulsing dot. Own view so its state resets each time it reappears.
+struct LiveDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dim = false
+
+    var body: some View {
+        Circle()
+            .fill(Theme.live)
+            .frame(width: 5, height: 5)
+            .opacity(dim && !reduceMotion ? 0.35 : 1)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
+            .onAppear { dim = true }
+    }
+}
+
+struct StatusPill: View {
+    let match: Match
 
     private var phase: MatchPhase { MatchPhase(match) }
 
@@ -69,16 +97,7 @@ struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if phase == .live {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 5, height: 5)
-                    .opacity(dim ? 0.35 : 1)
-                    .onAppear {
-                        guard !reduceMotion else { return }
-                        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
-                    }
-            }
+            if phase == .live { LiveDot() }
             Text(match.stateLabel.isEmpty ? "Unknown" : match.stateLabel)
                 .font(.system(size: 9.5, weight: .bold))
                 .textCase(.uppercase)
@@ -103,12 +122,15 @@ struct SideRow: View {
         let parts = ScoreParts(side.score)
         VStack(alignment: .trailing, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(side.name)
-                    .font(.system(size: 13, weight: batting ? .semibold : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(side.name)
+                // Full name if it fits, else the feed's short code.
+                ViewThatFits(in: .horizontal) {
+                    Text(side.name).lineLimit(1)
+                    if !shortName.isEmpty { Text(shortName).lineLimit(1) }
+                    Text(side.name).lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: 13, weight: batting ? .semibold : .regular))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(side.name)
                 if !parts.earlier.isEmpty {
                     Text(parts.earlier)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -117,10 +139,13 @@ struct SideRow: View {
                         .fixedSize()
                 }
                 if !parts.main.isEmpty {
+                    // Unusual long strings drop to a smaller size and can shrink, so they never overflow.
                     Text(parts.main)
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .font(.system(size: parts.main.count > 9 ? 13 : 17, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                        .fixedSize()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .layoutPriority(1)
                 }
             }
             if !parts.detail.isEmpty {
@@ -131,17 +156,27 @@ struct SideRow: View {
                     .lineLimit(1)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(side.score.isEmpty ? side.name : "\(side.name), \(side.score)")
+    }
+
+    private var shortName: String {
+        let s = side.short.trimmingCharacters(in: .whitespaces)
+        return s == "?" || s == side.name ? "" : s
     }
 }
 
 // MARK: - Buttons and hover
 
 struct IconButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         HoverPlate(pressed: configuration.isPressed, radius: 7) {
             configuration.label
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .opacity(isEnabled ? 1 : 0.45)
                 .frame(width: 24, height: 24)
         }
     }
