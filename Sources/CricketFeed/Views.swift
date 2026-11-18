@@ -483,8 +483,8 @@ struct RatesRow: View {
     }
 }
 
-// Every over on one line. The current over starts at the left edge and its
-// balls build towards the right. Older overs sit off-screen to the left.
+// Every over on one line. The current over sits at the right edge and its
+// balls build towards the left. Older overs sit off-screen to the right.
 // Trackpad users can swipe sideways.
 // Mouse users: click the line, then the scroll wheel moves it left/right.
 struct OversLine: View {
@@ -496,18 +496,18 @@ struct OversLine: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(overs, id: \.number) { over in
+                    ForEach(Array(overs.reversed()), id: \.number) { over in
                         if over.number == overs.last?.number {
-                            // Current over fills the visible width, left-aligned,
-                            // so new balls appear left and grow rightwards.
+                            // Current over fills the visible width, right-aligned,
+                            // so new balls appear on the right and push leftwards.
                             OverGroup(over: over)
-                                .padding(.leading, 12)
-                                .containerRelativeFrame(.horizontal, alignment: .leading)
+                                .padding(.trailing, 12)
+                                .containerRelativeFrame(.horizontal, alignment: .trailing)
                         } else {
                             OverGroup(over: over)
                                 .padding(.leading, 8)
                                 .padding(.trailing, 8)
-                                .overlay(alignment: .trailing) {
+                                .overlay(alignment: .leading) {
                                     Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 0.5, height: 14)
                                 }
                         }
@@ -516,14 +516,14 @@ struct OversLine: View {
                 .padding(.vertical, 3)
             }
             .scrollDisabled(false) // the card list may disable scrolling; don't inherit that
-            .defaultScrollAnchor(.trailing)
+            .defaultScrollAnchor(.leading)
             .mask {
-                // Fade on the left so older overs read as "more this way".
+                // Fade on the right so older overs read as "more this way".
                 // The current over is inset 12pt so the fade doesn't cover it.
                 HStack(spacing: 0) {
-                    LinearGradient(colors: [.black.opacity(0), .black], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 14)
                     Rectangle()
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 14)
                 }
             }
             .background(
@@ -541,7 +541,7 @@ struct OversLine: View {
                 // New ball: jump to it, unless the user is busy looking back.
                 guard !engaged else { return }
                 guard let n = overs.last?.number else { return }
-                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(n, anchor: .trailing) }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(n, anchor: .leading) }
             }
             .onAppear { wheel.start() }
             .onDisappear { wheel.stop() }
