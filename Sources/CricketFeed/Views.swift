@@ -483,9 +483,9 @@ struct RatesRow: View {
     }
 }
 
-// Every over on one line, newest first. The current over sits at the left edge.
+// Every over on one line, newest first, packed tight. The current over sits at the left edge.
 // Inside each over the newest ball comes straight after the over number, so
-// older balls get pushed right. Older overs sit off-screen to the right.
+// older balls get pushed right. Older overs follow straight after, then scroll off right.
 // Trackpad users can swipe sideways.
 // Mouse users: click the line, then the scroll wheel moves it left/right.
 struct OversLine: View {
@@ -497,21 +497,18 @@ struct OversLine: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
+                    // Each over is only as wide as its balls, so the current over
+                    // grows ball by ball (extras included) with no gap after it.
                     ForEach(Array(overs.reversed()), id: \.number) { over in
-                        if over.number == overs.last?.number {
-                            // Current over fills the visible width, left-aligned,
-                            // so older overs start off-screen to the right.
-                            OverGroup(over: over)
-                                .padding(.leading, 12)
-                                .containerRelativeFrame(.horizontal, alignment: .leading)
-                        } else {
-                            OverGroup(over: over)
-                                .padding(.leading, 12)
-                                .padding(.trailing, 12)
-                                .overlay(alignment: .leading) {
+                        let isCurrent = over.number == overs.last?.number
+                        OverGroup(over: over)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 12)
+                            .overlay(alignment: .leading) {
+                                if !isCurrent {
                                     Rectangle().fill(Theme.hairline).frame(width: 1, height: 30)
                                 }
-                        }
+                            }
                     }
                 }
                 .padding(.vertical, 3)
