@@ -508,8 +508,10 @@ struct PlayersTable: View {
     let batters: [BatterLine]
     let bowlers: [BowlerLine]
 
-    // Fixed number columns so both halves line up.
-    private static let widths: [CGFloat] = [28, 26, 24, 22, 48]
+    // Fixed number columns so both halves line up. Numbers are right-aligned, so the
+    // gap before a column is its width minus its text: 3-digit balls and bowler runs
+    // ("102 111", "3 112") need 30 and 27 to stay apart.
+    private static let widths: [CGFloat] = [28, 30, 27, 20, 46]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

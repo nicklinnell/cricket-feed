@@ -169,8 +169,8 @@ struct BowlerLine: Hashable {
 func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerLine]) {
     guard let at = items.lastIndex(where: { $0.batsman?.athlete?.id != nil }) else { return ([], []) }
     let latest = items[at]
-    // A later item that names no players but records a wicket still counts.
-    let laterWicket = items[(at + 1)...].contains { $0.dismissal?.dismissal == true }
+    // Wickets on this ball or on a later item that names no players.
+    let wickets = items[at...].filter { $0.dismissal?.dismissal == true }
 
     func batter(_ b: PBPBatter?) -> BatterLine? {
         guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { return nil }
@@ -184,12 +184,11 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     }
 
     var batters = [batter(latest.batsman), batter(latest.otherBatsman)].compactMap { $0 }
-    if laterWicket {
-        // Don't know who is out, so leave both rows but drop the strike mark.
-    } else if latest.dismissal?.dismissal == true {
+    if !wickets.isEmpty {
         // The new batter isn't in the feed until they face. Show who's left,
         // with no strike mark (who faces next depends on whether they crossed).
-        if let out = latest.dismissal?.batsman?.athlete?.id { batters.removeAll { $0.id == out } }
+        let out = Set(wickets.compactMap { $0.dismissal?.batsman?.athlete?.id })
+        batters.removeAll { out.contains($0.id) }
     } else if let striker = batters.first, batters.count == 2 {
         // Who faces next: odd runs run swap ends, and so does the end of an over.
         // scoreValue includes the 1-run penalty for a wide or no-ball.
@@ -262,8 +261,8 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     for p in firstPage...lastPage {
         items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
     }
-    // The feed sometimes ends with an empty filler item (no players, zeroed rates). Skip it.
-    guard let latest = items.last(where: { $0.batsman?.athlete?.id != nil }) ?? items.last else { return nil }
+    // The feed sometimes ends with an empty filler item (no players, no team, zeroed rates). Skip it.
+    guard let latest = items.last(where: { $0.batsman?.athlete?.id != nil || !($0.team?.displayName ?? "").isEmpty }) else { return nil }
 
     // Group balls by over number.
     var byOver: [Int: [Ball]] = [:]
