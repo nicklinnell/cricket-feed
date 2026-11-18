@@ -19,6 +19,34 @@ struct PBPItem: Decodable {
     let dismissal: PBPDismissal?
     let team: Team?
     let shortText: String?
+    let batsman: PBPBatter?
+    let otherBatsman: PBPBatter?
+    let bowler: PBPBowler?
+    let otherBowler: PBPBowler?
+}
+
+struct PBPAthlete: Decodable {
+    let id: String?
+    let displayName: String?
+}
+
+struct PBPPerson: Decodable { let athlete: PBPAthlete? }
+
+// Figures are totals after this ball.
+struct PBPBatter: Decodable {
+    let athlete: PBPAthlete?
+    let totalRuns: Int?
+    let faced: Int?
+    let fours: Int?
+    let sixes: Int?
+}
+
+struct PBPBowler: Decodable {
+    let athlete: PBPAthlete?
+    let balls: Int?
+    let maidens: Int?
+    let conceded: Int?
+    let wickets: Int?
 }
 
 struct PBPType: Decodable { let description: String? }
@@ -30,6 +58,7 @@ struct PBPOver: Decodable {
     let noBall: Int?
     let legByes: Int?
     let byes: Int?
+    let complete: Bool?
 }
 
 struct PBPInnings: Decodable {
@@ -41,7 +70,10 @@ struct PBPInnings: Decodable {
     let ballLimit: Int?
 }
 
-struct PBPDismissal: Decodable { let dismissal: Bool? }
+struct PBPDismissal: Decodable {
+    let dismissal: Bool?
+    let batsman: PBPPerson?   // who is out (can be the non-striker)
+}
 
 // MARK: - What the UI shows
 
@@ -75,6 +107,8 @@ struct LiveDetail: Hashable {
     var rrr: Double?
     var lastFive: String?     // "38/2 (7.60)"
     var overs: [OverSummary]  // oldest first, every over we fetched
+    var batters: [BatterLine] = []
+    var bowlers: [BowlerLine] = []
 
     var rates: [(label: String, value: String)] {
         var out: [(label: String, value: String)] = []
@@ -83,6 +117,85 @@ struct LiveDetail: Hashable {
         if let lastFive { out.append(("Last 5 ov", lastFive)) }
         return out
     }
+}
+
+struct BatterLine: Hashable {
+    let id: String
+    let name: String
+    let runs: Int
+    let balls: Int
+    let fours: Int
+    let sixes: Int
+    var onStrike = false
+
+    var strikeRate: String {
+        balls > 0 ? String(format: "%.2f", Double(runs) * 100 / Double(balls)) : "-"
+    }
+}
+
+struct BowlerLine: Hashable {
+    let id: String
+    let name: String
+    let balls: Int        // legal balls bowled
+    let maidens: Int
+    let conceded: Int
+    let wickets: Int
+
+    // 44 balls -> "7.2", 42 -> "7".
+    var overs: String { balls % 6 == 0 ? "\(balls / 6)" : "\(balls / 6).\(balls % 6)" }
+    var economy: String {
+        balls > 0 ? String(format: "%.2f", Double(conceded) * 6 / Double(balls)) : "-"
+    }
+}
+
+// The two batters and two bowlers as of the latest ball.
+// Batters keep the order they first show up in, so rows don't swap every run.
+// The feed has no batting position, so this is a best guess.
+func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerLine]) {
+    guard let latest = items.last else { return ([], []) }
+
+    func batter(_ b: PBPBatter?) -> BatterLine? {
+        guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { return nil }
+        return BatterLine(id: id, name: name, runs: b?.totalRuns ?? 0, balls: b?.faced ?? 0,
+                          fours: b?.fours ?? 0, sixes: b?.sixes ?? 0)
+    }
+    func bowler(_ b: PBPBowler?) -> BowlerLine? {
+        guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { return nil }
+        return BowlerLine(id: id, name: name, balls: b?.balls ?? 0, maidens: b?.maidens ?? 0,
+                          conceded: b?.conceded ?? 0, wickets: b?.wickets ?? 0)
+    }
+
+    var batters = [batter(latest.batsman), batter(latest.otherBatsman)].compactMap { $0 }
+    let out = latest.dismissal?.dismissal == true ? latest.dismissal?.batsman?.athlete?.id : nil
+    if let out {
+        // The new batter isn't in the feed until they face. Show who's left.
+        batters.removeAll { $0.id == out }
+    } else if let striker = batters.first, batters.count == 2 {
+        // Who faces next: odd runs run swap ends, and so does the end of an over.
+        let o = latest.over
+        let penalty = ((o?.wide ?? 0) > 0 || (o?.noBall ?? 0) > 0) ? 1 : 0
+        let ran = max(0, (latest.scoreValue ?? 0) - penalty)
+        let boundary = ["four", "six"].contains(latest.playType?.description ?? "")
+        var swap = !boundary && ran % 2 == 1
+        if o?.complete == true { swap.toggle() }
+        let next = swap ? batters[1].id : striker.id
+        for i in batters.indices { batters[i].onStrike = batters[i].id == next }
+    }
+    var firstSeen: [String: Int] = [:]
+    for (i, item) in items.enumerated() {
+        for id in [item.batsman?.athlete?.id, item.otherBatsman?.athlete?.id].compactMap({ $0 }) where firstSeen[id] == nil {
+            firstSeen[id] = i
+        }
+    }
+    // Both seen on the same ball: the one with more balls faced most likely came in first.
+    batters.sort { a, b in
+        let fa = firstSeen[a.id] ?? .max, fb = firstSeen[b.id] ?? .max
+        return fa != fb ? fa < fb : (a.balls, a.id) > (b.balls, b.id)
+    }
+
+    // Current bowler first.
+    let bowlers = [bowler(latest.bowler), bowler(latest.otherBowler)].compactMap { $0 }
+    return (batters, bowlers)
 }
 
 func ballFor(_ item: PBPItem) -> Ball {
@@ -146,6 +259,7 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     let overs = shown.map { OverSummary(number: $0, balls: byOver[$0]!) }
 
     var detail = LiveDetail(overs: overs)
+    (detail.batters, detail.bowlers) = playersFor(items)
     let inn = latest.innings
     detail.crr = inn?.runRate
     if let target = inn?.target, target > 0 {

@@ -11,13 +11,20 @@ final class ScoreStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(watched), forKey: Self.watchedKey) }
     }
 
+    // Cards with the batters & bowlers table open. Remembered across launches.
+    @Published var statsOpen: Set<String> {
+        didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
+    }
+
     static let watchedKey = "watchedMatchIDs"
+    static let statsOpenKey = "statsOpenMatchIDs"
     let refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
 
     init() {
         watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
+        statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
     }
 
     var watchedMatches: [Match] {
@@ -26,6 +33,10 @@ final class ScoreStore: ObservableObject {
 
     func toggle(_ match: Match) {
         if watched.contains(match.id) { watched.remove(match.id) } else { watched.insert(match.id) }
+    }
+
+    func toggleStats(_ match: Match) {
+        if statsOpen.contains(match.id) { statsOpen.remove(match.id) } else { statsOpen.insert(match.id) }
     }
 
     func start() {
