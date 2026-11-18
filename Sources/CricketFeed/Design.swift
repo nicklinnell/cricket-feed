@@ -6,13 +6,13 @@ enum Theme {
     static let panelWidth: CGFloat = 300
     static let panelRadius: CGFloat = 16
     static let cardRadius: CGFloat = 11
-    static let live = Color.red
+    static let live = Color(nsColor: dynamic(dark: .systemRed, light: NSColor(srgbRed: 0.72, green: 0.08, blue: 0.08, alpha: 1)))
     // Darker orange in light mode so small text stays readable.
-    static let paused = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? .systemOrange
-            : NSColor(srgbRed: 0.63, green: 0.32, blue: 0.0, alpha: 1)
-    })
+    static let paused = Color(nsColor: dynamic(dark: .systemOrange, light: NSColor(srgbRed: 0.56, green: 0.28, blue: 0.0, alpha: 1)))
+
+    private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
+        NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
+    }
     // Header, footer, padding and a small margin above the screen edge.
     static let panelChrome: CGFloat = 96
 }

@@ -14,7 +14,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if picking {
-                MatchPicker(store: store)
+                MatchPicker(store: store, maxHeight: room.maxListHeight - 34)
             } else {
                 watchedList
             }
@@ -102,8 +102,8 @@ struct ContentView: View {
                             }
                     }
                 }
-                .padding(.bottom, scrolls ? 6 : 0)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                .padding(.bottom, scrolls ? 18 : 0)
             }
             .scrollDisabled(!scrolls)
             .frame(height: min(max(listHeight, 1), room.maxListHeight))
@@ -202,6 +202,7 @@ struct MatchCard: View {
 
 struct MatchPicker: View {
     @ObservedObject var store: ScoreStore
+    var maxHeight: CGFloat = 320
     @State private var search = ""
     @FocusState private var searchFocused: Bool
 
@@ -268,7 +269,7 @@ struct MatchPicker: View {
                     }
                 }
             }
-            .frame(height: 320)
+            .frame(height: min(320, maxHeight))
         }
         .onAppear { searchFocused = true }
     }
