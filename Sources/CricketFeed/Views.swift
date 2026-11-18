@@ -5,9 +5,11 @@ struct ContentView: View {
     @ObservedObject var store: ScoreStore
     var onSizeChange: (CGSize) -> Void = { _ in }
     @State private var picking = false
+    @State private var refreshing = false
+    @State private var spin = 0.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             if picking {
                 MatchPicker(store: store)
@@ -16,39 +18,76 @@ struct ContentView: View {
             }
             footer
         }
-        .padding(10)
-        .frame(width: 300)
+        .padding(12)
+        .frame(width: Theme.panelWidth)
         .fixedSize(horizontal: false, vertical: true)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSizeChange($0) }
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 4) {
             Text(picking ? "Pick matches" : "Cricket")
-                .font(.headline)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
             Spacer()
-            Button {
-                Task { await store.refresh() }
-            } label: { Image(systemName: "arrow.clockwise") }
-            .help("Refresh now")
-            Button {
-                picking.toggle()
-            } label: { Image(systemName: picking ? "checkmark" : "plus") }
-            .help(picking ? "Done" : "Pick matches")
+            if picking {
+                Button("Done") { picking = false }
+                    .buttonStyle(PillButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button {
+                    Task { await refreshNow() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .rotationEffect(.degrees(spin))
+                }
+                .buttonStyle(IconButtonStyle())
+                .help("Refresh now")
+                .accessibilityLabel("Refresh now")
+                .disabled(refreshing)
+                Button {
+                    picking = true
+                } label: { Image(systemName: "plus") }
+                .buttonStyle(IconButtonStyle())
+                .help("Pick matches")
+                .accessibilityLabel("Pick matches")
+            }
         }
-        .buttonStyle(.borderless)
+        .frame(height: 24)
+    }
+
+    private func refreshNow() async {
+        refreshing = true
+        withAnimation(.linear(duration: 0.6)) { spin += 360 }
+        await store.refresh()
+        refreshing = false
     }
 
     @ViewBuilder
     private var watchedList: some View {
         let items = store.watchedMatches
-        if items.isEmpty {
-            Text(store.watched.isEmpty
-                 ? "No matches picked. Press + to choose some."
-                 : "Your picked matches are not in the feed right now.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        if store.watched.isEmpty {
+            EmptyStateView(
+                symbol: "cricket.ball",
+                title: "No matches yet",
+                message: "Pick the games you want to follow and their scores will show here.",
+                action: ("Pick matches", { picking = true })
+            )
+        } else if store.lastUpdated == nil && store.error == nil {
+            ForEach(0..<min(store.watched.count, 2), id: \.self) { _ in SkeletonCard() }
+        } else if items.isEmpty {
+            EmptyStateView(
+                symbol: store.lastUpdated == nil ? "wifi.slash" : "calendar.badge.clock",
+                title: store.lastUpdated == nil ? "Can't reach the score feed" : "Nothing on right now",
+                message: store.lastUpdated == nil
+                    ? "Will keep trying every few seconds."
+                    : "Your picked matches aren't in the feed at the moment.",
+                action: store.lastUpdated == nil ? nil : ("Pick matches", { picking = true })
+            )
         } else {
             ForEach(items) { match in
                 MatchCard(match: match)
@@ -61,18 +100,29 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 5) {
             if let err = store.error {
-                Text(err).foregroundStyle(.red)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.paused)
+                Text(store.lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline")
+                    .help(err)
+                    .accessibilityHint(err)
             } else if let t = store.lastUpdated {
-                Text("Updated \(t.formatted(date: .omitted, time: .standard))")
+                Text("Updated \(short(t))")
             } else {
-                Text("Loading...")
+                ProgressView().controlSize(.mini)
+                Text("Fetching scores")
             }
             Spacer()
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
+        .font(.system(size: 10.5))
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+        .padding(.horizontal, 2)
+    }
+
+    private func short(_ d: Date) -> String {
+        d.formatted(date: .omitted, time: .shortened)
     }
 }
 
@@ -80,42 +130,54 @@ struct MatchCard: View {
     let match: Match
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                if match.isLive {
-                    Circle().fill(.red).frame(width: 7, height: 7)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    if !match.detail.isEmpty {
+                        Text(match.detail)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    Text(match.league)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Text(match.league)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
-                Text(match.stateLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                StatusPill(match: match)
             }
+            .padding(.bottom, 2)
             ForEach(match.sides, id: \.self) { side in
-                HStack {
-                    Text(side.name).lineLimit(1)
-                    Spacer()
-                    Text(side.score).monospacedDigit().bold()
-                }
-                .font(.callout)
+                SideRow(side: side, batting: battingSide == side)
             }
             if !match.summary.isEmpty {
                 Text(match.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11.5, weight: match.isLive ? .medium : .regular))
+                    .foregroundStyle(match.isLive ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
+                    }
             }
         }
-        .padding(8)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .padding(11)
+        .cardBackground()
+    }
+
+    // Best guess: in live play, the only side whose score has overs in brackets is batting.
+    private var battingSide: Match.Side? {
+        guard MatchPhase(match) == .live else { return nil }
+        let withOvers = match.sides.filter { !ScoreParts($0.score).detail.isEmpty }
+        return withOvers.count == 1 ? withOvers[0] : nil
     }
 }
 
 struct MatchPicker: View {
     @ObservedObject var store: ScoreStore
     @State private var search = ""
+    @FocusState private var searchFocused: Bool
 
     private var filtered: [Match] {
         let all = store.matches.sorted { a, b in
@@ -133,30 +195,111 @@ struct MatchPicker: View {
         switch m.state { case "in": 0; case "pre": 1; default: 2 }
     }
 
+    private var sections: [(title: String, matches: [Match])] {
+        let groups = Dictionary(grouping: filtered, by: rank)
+        return [(0, "Live"), (1, "Upcoming"), (2, "Finished")].compactMap { key, title in
+            guard let m = groups[key], !m.isEmpty else { return nil }
+            return (title, m)
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("Search teams or series", text: $search)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 8) {
+            searchField
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(filtered) { match in
-                        Toggle(isOn: Binding(
-                            get: { store.watched.contains(match.id) },
-                            set: { _ in store.toggle(match) }
-                        )) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(match.title).font(.callout)
-                                Text("\(match.stateLabel)  |  \(match.league)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
+                    if sections.isEmpty {
+                        EmptyStateView(
+                            symbol: "magnifyingglass",
+                            title: store.matches.isEmpty ? "No matches in the feed" : "No results",
+                            message: store.matches.isEmpty
+                                ? "Check back soon."
+                                : "Nothing matches \u{201C}\(search)\u{201D}."
+                        )
+                    }
+                    ForEach(sections, id: \.title) { section in
+                        Text(section.title)
+                            .font(.system(size: 9.5, weight: .bold))
+                            .textCase(.uppercase)
+                            .kerning(0.6)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 8)
+                            .padding(.top, section.title == sections.first?.title ? 2 : 10)
+                            .padding(.bottom, 3)
+                        ForEach(section.matches) { match in
+                            PickerRow(match: match, selected: store.watched.contains(match.id)) {
+                                store.toggle(match)
                             }
                         }
-                        .toggleStyle(.checkbox)
                     }
                 }
             }
+            .scrollIndicators(.never)
             .frame(height: 320)
+        }
+        .onAppear { searchFocused = true }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("Search teams or series", text: $search)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .focused($searchFocused)
+            if !search.isEmpty {
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+struct PickerRow: View {
+    let match: Match
+    let selected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 9) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(match.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    Text([match.detail, match.league].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(PickerRowStyle(selected: selected))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+struct PickerRowStyle: ButtonStyle {
+    let selected: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        HoverPlate(pressed: configuration.isPressed, selected: selected, radius: 8) {
+            configuration.label
         }
     }
 }

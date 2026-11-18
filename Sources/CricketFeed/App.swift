@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "cricket.ball", accessibilityDescription: "Cricket")
             ?? NSImage(systemSymbolName: "sportscourt", accessibilityDescription: "Cricket")
+        statusItem.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show / Hide Scores", action: #selector(togglePanel), keyEquivalent: "s"))
         menu.addItem(.separator())
@@ -62,7 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel, size.width > 0, size.height > 0 else { return }
         let old = panel.frame
         let new = NSRect(x: old.minX, y: old.maxY - size.height, width: size.width, height: size.height)
-        if new != old { panel.setFrame(new, display: true) }
+        if new != old {
+            panel.setFrame(new, display: true)
+            panel.invalidateShadow()
+        }
     }
 
     @objc func togglePanel() {
