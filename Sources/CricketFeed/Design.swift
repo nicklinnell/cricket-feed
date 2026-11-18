@@ -10,6 +10,10 @@ enum Theme {
     // Darker orange in light mode so small text stays readable.
     static let paused = Color(nsColor: dynamic(dark: .systemOrange, light: NSColor(srgbRed: 0.56, green: 0.28, blue: 0.0, alpha: 1)))
 
+    // Ball-by-ball chips. Slightly darker in light mode so white text stays readable.
+    static let four = Color(nsColor: dynamic(dark: .systemGreen, light: NSColor(srgbRed: 0.13, green: 0.55, blue: 0.24, alpha: 1)))
+    static let six = Color(nsColor: dynamic(dark: .systemPurple, light: NSColor(srgbRed: 0.50, green: 0.24, blue: 0.75, alpha: 1)))
+
     private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
     }

@@ -22,6 +22,7 @@ struct League: Decodable {
 struct Event: Decodable {
     let id: String
     let name: String?
+    let description: String?
     let status: Status?
     let competitions: [Competition]?
 }
@@ -34,6 +35,7 @@ struct Competition: Decodable {
 
 struct Status: Decodable {
     let summary: String?
+    let period: Int?
     let type: StatusType?
 }
 
@@ -62,12 +64,15 @@ struct Match: Identifiable, Hashable {
     }
 
     let id: String
+    let leagueID: String
     let league: String
     let title: String
     let detail: String
     let state: String
     let stateLabel: String
     let summary: String
+    let fullDescription: String
+    let period: Int
     let sides: [Side]
 
     var isLive: Bool { state == "in" }
@@ -99,6 +104,7 @@ func fetchMatches() async throws -> [Match] {
     var result: [Match] = []
     for block in panel.scores {
         let leagueName = block.leagues?.first?.name ?? ""
+        let leagueID = block.leagues?.first?.id ?? ""
         for event in block.events ?? [] {
             let comp = event.competitions?.first
             let status = comp?.status ?? event.status
@@ -111,12 +117,15 @@ func fetchMatches() async throws -> [Match] {
             }
             result.append(Match(
                 id: event.id,
+                leagueID: leagueID,
                 league: leagueName,
                 title: event.name ?? sides.map(\.name).joined(separator: " v "),
                 detail: comp?.description ?? "",
                 state: status?.type?.state ?? "",
                 stateLabel: status?.type?.description ?? "",
                 summary: status?.summary ?? "",
+                fullDescription: event.description ?? "",
+                period: status?.period ?? 1,
                 sides: sides
             ))
         }

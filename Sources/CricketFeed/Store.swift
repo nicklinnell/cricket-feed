@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class ScoreStore: ObservableObject {
     @Published var matches: [Match] = []
+    @Published var details: [String: LiveDetail] = [:]
     @Published var lastUpdated: Date?
     @Published var error: String?
     @Published var watched: Set<String> {
@@ -41,10 +42,27 @@ final class ScoreStore: ObservableObject {
         do {
             let fresh = try await fetchMatches()
             matches = fresh
+            await refreshDetails()
             lastUpdated = Date()
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    // Ball-by-ball for watched live matches. A failure keeps the old detail.
+    private func refreshDetails() async {
+        let live = watchedMatches.filter(\.isLive)
+        let results = await withTaskGroup(of: (String, LiveDetail?).self) { group in
+            for m in live {
+                group.addTask { (m.id, try? await fetchLiveDetail(m)) }
+            }
+            var out: [(String, LiveDetail?)] = []
+            for await r in group { out.append(r) }
+            return out
+        }
+        var next = details.filter { id, _ in live.contains { $0.id == id } }
+        for (id, d) in results where d != nil { next[id] = d }
+        details = next
     }
 }

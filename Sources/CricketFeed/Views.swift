@@ -95,7 +95,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(items) { match in
-                        MatchCard(match: match)
+                        MatchCard(match: match, detail: store.details[match.id])
                             .contextMenu {
                                 Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
                                 Button("Stop watching") { store.toggle(match) }
@@ -149,12 +149,13 @@ struct ContentView: View {
 
 struct MatchCard: View {
     let match: Match
+    var detail: LiveDetail?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .center, spacing: 6) {
-                    Text(match.detail.isEmpty ? match.league : match.detail)
+                    Text(match.detail.isEmpty ? match.league : match.detail + dayNight)
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
                     Spacer(minLength: 4)
@@ -166,25 +167,66 @@ struct MatchCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if !venue.isEmpty {
+                    Text(venue)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             .padding(.bottom, 2)
             ForEach(match.sides, id: \.self) { side in
                 SideRow(side: side, batting: battingSide == side)
             }
-            if !match.summary.isEmpty {
-                Text(match.summary)
-                    .font(.system(size: 11.5, weight: inPlay ? .medium : .regular))
-                    .foregroundStyle(inPlay ? .primary : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .top) {
-                        Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
+            if !summaryText.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(summaryText)
+                        .font(.system(size: 11.5, weight: inPlay ? .medium : .regular))
+                        .foregroundStyle(inPlay ? .primary : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let live = liveDetail, !live.rates.isEmpty {
+                        RatesRow(rates: live.rates)
                     }
+                }
+                .padding(.top, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Hairline() }
+            }
+            if let overs = liveDetail?.overs, !overs.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(overs.reversed(), id: \.self) { OverRow(over: $0) }
+                }
+                .padding(.top, 6)
+                .overlay(alignment: .top) { Hairline() }
             }
         }
         .padding(10)
         .cardBackground()
+    }
+
+    // Ball-by-ball extras only while the match is in play (live or a break).
+    private var liveDetail: LiveDetail? {
+        match.isLive ? detail : nil
+    }
+
+    // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
+    private var summaryText: String {
+        liveDetail?.chase ?? match.summary
+    }
+
+    // "3rd ODI (D/N), England tour of Australia at Hobart, Nov 18 2026"
+    //  -> dayNight " (D/N)", venue "Hobart, Nov 18 2026".
+    private var dayNight: String {
+        let full = match.fullDescription
+        guard full.hasPrefix(match.detail) else { return "" }
+        let rest = full.dropFirst(match.detail.count)
+        guard rest.hasPrefix(" ("), let close = rest.firstIndex(of: ")") else { return "" }
+        return String(rest[...close])
+    }
+
+    private var venue: String {
+        guard let r = match.fullDescription.range(of: " at ", options: .backwards) else { return "" }
+        return String(match.fullDescription[r.upperBound...])
     }
 
     // Emphasise the summary only for live play, and not for stale toss news.
@@ -334,6 +376,103 @@ struct PickerRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HoverPlate(pressed: configuration.isPressed, selected: selected, radius: 8) {
             configuration.label
+        }
+    }
+}
+
+// MARK: - Live detail
+
+struct Hairline: View {
+    var body: some View {
+        Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
+    }
+}
+
+// "CRR 5.14   RRR 11.47   Last 5 ov 38/2 (7.60)"
+struct RatesRow: View {
+    let rates: [(label: String, value: String)]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(rates, id: \.label) { rate in
+                HStack(spacing: 3) {
+                    Text(rate.label).foregroundStyle(.secondary)
+                    Text(rate.value).fontWeight(.medium)
+                }
+                .fixedSize()
+            }
+        }
+        .font(.system(size: 10.5))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// One over: "40  [•][W][•][•][1][•]   1 run"
+struct OverRow: View {
+    let over: OverSummary
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(ordinal(over.number))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: 30, alignment: .leading)
+            ForEach(Array(over.balls.enumerated()), id: \.offset) { _, ball in
+                BallChip(ball: ball)
+            }
+            Spacer(minLength: 4)
+            Text(over.runs == 1 ? "1 run" : "\(over.runs) runs")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .fixedSize()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
+    }
+
+    private func ordinal(_ n: Int) -> String {
+        let tens = n % 100
+        let suffix = (11...13).contains(tens) ? "th" : [1: "st", 2: "nd", 3: "rd"][n % 10] ?? "th"
+        return "\(n)\(suffix)"
+    }
+}
+
+struct BallChip: View {
+    let ball: Ball
+
+    var body: some View {
+        Text(ball.label)
+            .font(.system(size: ball.label.count > 2 ? 8.5 : 10.5, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(fg)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, ball.label.count > 2 ? 2.5 : 0)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(bg, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+
+    private var bg: Color {
+        switch ball.kind {
+        case .four: Theme.four
+        case .six: Theme.six
+        case .wicket: Theme.live
+        case .extra: Theme.paused.opacity(0.15)
+        case .dot, .runs: Color.primary.opacity(0.07)
+        }
+    }
+
+    private var fg: Color {
+        switch ball.kind {
+        case .four, .six, .wicket: .white
+        case .extra: Theme.paused
+        case .dot: .secondary
+        case .runs: .primary
         }
     }
 }
