@@ -74,7 +74,7 @@ struct LiveDetail: Hashable {
     var crr: Double?
     var rrr: Double?
     var lastFive: String?     // "38/2 (7.60)"
-    var overs: [OverSummary]  // oldest first, last 2 overs
+    var overs: [OverSummary]  // oldest first, every over we fetched
 
     var rates: [(label: String, value: String)] {
         var out: [(label: String, value: String)] = []
@@ -125,7 +125,8 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     let lastPage = first.pageCount
     guard lastPage > 0 else { return nil }
     var items: [PBPItem] = []
-    for p in max(1, lastPage - 2)...lastPage {
+    let firstPage = max(1, lastPage - 2)
+    for p in firstPage...lastPage {
         items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
     }
     guard let latest = items.last else { return nil }
@@ -140,7 +141,9 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
         if b.kind == .wicket { wicketsByOver[n, default: 0] += 1 }
     }
     let numbers = byOver.keys.sorted()
-    let overs = numbers.suffix(2).map { OverSummary(number: $0, balls: byOver[$0]!) }
+    // If we didn't start at page 1, the oldest over is probably cut off. Drop it.
+    let shown = firstPage > 1 && numbers.count > 1 ? Array(numbers.dropFirst()) : numbers
+    let overs = shown.map { OverSummary(number: $0, balls: byOver[$0]!) }
 
     var detail = LiveDetail(overs: overs)
     let inn = latest.innings

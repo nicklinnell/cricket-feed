@@ -193,10 +193,8 @@ struct MatchCard: View {
                 .overlay(alignment: .top) { Hairline() }
             }
             if let overs = liveDetail?.overs, !overs.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(overs.reversed(), id: \.self) { OverRow(over: $0) }
-                }
-                .padding(.top, 6)
+                OversLine(overs: overs)
+                    .padding(.top, 6)
                 .overlay(alignment: .top) { Hairline() }
             }
         }
@@ -410,8 +408,119 @@ struct RatesRow: View {
     }
 }
 
-// One over: "40  [•][W][•][•][1][•]   1 run"
-struct OverRow: View {
+// Every over on one line. The current over starts at the left edge and its
+// balls build towards the right. Older overs sit off-screen to the left.
+// Trackpad users can swipe sideways.
+// Mouse users: click the line, then the scroll wheel moves it left/right.
+struct OversLine: View {
+    let overs: [OverSummary]
+    @State private var engaged = false
+    @State private var wheel = WheelRedirect()
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(overs, id: \.number) { over in
+                        if over.number == overs.last?.number {
+                            // Current over fills the visible width, left-aligned,
+                            // so new balls appear left and grow rightwards.
+                            OverGroup(over: over)
+                                .padding(.leading, 12)
+                                .containerRelativeFrame(.horizontal, alignment: .leading)
+                        } else {
+                            OverGroup(over: over)
+                                .padding(.leading, 8)
+                                .padding(.trailing, 8)
+                                .overlay(alignment: .trailing) {
+                                    Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 0.5, height: 14)
+                                }
+                        }
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+            .scrollDisabled(false) // the card list may disable scrolling; don't inherit that
+            .defaultScrollAnchor(.trailing)
+            .mask {
+                // Fade on the left so older overs read as "more this way".
+                // The current over is inset 12pt so the fade doesn't cover it.
+                HStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0), .black], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 14)
+                    Rectangle()
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(engaged ? 0.6 : 0), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { engaged.toggle() }
+            .onHover { inside in
+                wheel.hovering = inside
+                if !inside { engaged = false }
+            }
+            .onChange(of: engaged) { _, on in wheel.active = on }
+            .onChange(of: lastBallKey) { _, _ in
+                // New ball: jump to it, unless the user is busy looking back.
+                guard !engaged else { return }
+                guard let n = overs.last?.number else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(n, anchor: .trailing) }
+            }
+            .onAppear { wheel.start() }
+            .onDisappear { wheel.stop() }
+            .help(engaged ? "Scroll to see earlier overs. Click again to stop." : "Click, then scroll to see earlier overs")
+        }
+    }
+
+    private var lastBallKey: String {
+        guard let last = overs.last else { return "" }
+        return "\(last.number)-\(last.balls.count)"
+    }
+}
+
+// Turns up/down mouse-wheel scrolls into left/right while the line is clicked
+// and the pointer is over it. Without this a normal mouse can't scroll sideways.
+final class WheelRedirect {
+    var active = false
+    var hovering = false
+    private var monitor: Any?
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, self.active, self.hovering,
+                  abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+                  let cg = event.cgEvent?.copy() else { return event }
+            let pairs: [(CGEventField, CGEventField)] = [
+                (.scrollWheelEventDeltaAxis1, .scrollWheelEventDeltaAxis2),
+                (.scrollWheelEventPointDeltaAxis1, .scrollWheelEventPointDeltaAxis2),
+                (.scrollWheelEventFixedPtDeltaAxis1, .scrollWheelEventFixedPtDeltaAxis2),
+            ]
+            for (vertical, horizontal) in pairs {
+                if vertical == .scrollWheelEventFixedPtDeltaAxis1 {
+                    cg.setDoubleValueField(horizontal, value: cg.getDoubleValueField(vertical))
+                    cg.setDoubleValueField(vertical, value: 0)
+                } else {
+                    cg.setIntegerValueField(horizontal, value: cg.getIntegerValueField(vertical))
+                    cg.setIntegerValueField(vertical, value: 0)
+                }
+            }
+            return NSEvent(cgEvent: cg) ?? event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    deinit { stop() }
+}
+
+// One over inside the line: "40th [•][W][•][•][1][•] 1"
+struct OverGroup: View {
     let over: OverSummary
 
     var body: some View {
@@ -420,16 +529,17 @@ struct OverRow: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .frame(width: 30, alignment: .leading)
+                .fixedSize()
+                .padding(.trailing, 2)
             ForEach(Array(over.balls.enumerated()), id: \.offset) { _, ball in
                 BallChip(ball: ball)
             }
-            Spacer(minLength: 4)
-            Text(over.runs == 1 ? "1 run" : "\(over.runs) runs")
+            Text("\(over.runs)")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .fixedSize()
+                .padding(.leading, 2)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
