@@ -506,10 +506,10 @@ struct OversLine: View {
                                 .containerRelativeFrame(.horizontal, alignment: .leading)
                         } else {
                             OverGroup(over: over)
-                                .padding(.leading, 8)
-                                .padding(.trailing, 8)
+                                .padding(.leading, 12)
+                                .padding(.trailing, 12)
                                 .overlay(alignment: .leading) {
-                                    Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 0.5, height: 14)
+                                    Rectangle().fill(Theme.hairline).frame(width: 1, height: 30)
                                 }
                         }
                     }
@@ -594,28 +594,36 @@ final class WheelRedirect {
     deinit { stop() }
 }
 
-// One over inside the line: "40th [•][W][•][•][1][•] 1"
+// One over inside the line: "40th  6/RUNS [•][W][•][•][1][4]"
+// The run total sits stacked above a small "RUNS" label, like Cricinfo.
 struct OverGroup: View {
     let over: OverSummary
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             Text(ordinal(over.number))
                 .font(.system(size: Theme.metaSize, weight: .medium))
                 .foregroundStyle(Theme.meta)
                 .monospacedDigit()
                 .fixedSize()
-                .padding(.trailing, 2)
-            // Newest ball first, right after the over number.
+                .padding(.trailing, 4)
+            VStack(spacing: 0) {
+                Text("\(over.runs)")
+                    .font(.system(size: Theme.bodySize, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                Text(over.runs == 1 ? "RUN" : "RUNS")
+                    .font(.system(size: 8, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(Theme.meta)
+            }
+            .fixedSize()
+            .frame(minWidth: 26)
+            .padding(.trailing, 2)
+            // Newest ball first, right after the run total.
             ForEach(Array(over.balls.enumerated().reversed()), id: \.offset) { _, ball in
                 BallChip(ball: ball)
             }
-            Text("= \(over.runs)")
-                .font(.system(size: Theme.metaSize, weight: .medium))
-                .foregroundStyle(Theme.meta)
-                .monospacedDigit()
-                .fixedSize()
-                .padding(.leading, 3)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
