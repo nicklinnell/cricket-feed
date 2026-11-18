@@ -16,19 +16,26 @@ final class ScoreStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
     }
 
-    // Team names, as the feed spells them. Their matches show without being picked.
-    @Published var favourites: Set<String> {
-        didSet { UserDefaults.standard.set(Array(favourites), forKey: Self.favouritesKey) }
+    // Favourite teams: ESPN team ID -> name. IDs, not names, so a renamed or
+    // differently spelled team still matches. Name is for showing in the list.
+    @Published var favourites: [String: String] {
+        didSet { UserDefaults.standard.set(favourites, forKey: Self.favouritesKey) }
     }
 
-    // Favourite-team matches the user chose to stop watching.
+    // When on, favourite teams' matches go in the panel without being picked.
+    @Published var autoWatch: Bool {
+        didSet { UserDefaults.standard.set(autoWatch, forKey: Self.autoWatchKey) }
+    }
+
+    // Matches the user stopped watching. Keeps auto-watch from adding them back.
     @Published var hidden: Set<String> {
         didSet { UserDefaults.standard.set(Array(hidden), forKey: Self.hiddenKey) }
     }
 
     static let watchedKey = "watchedMatchIDs"
     static let statsOpenKey = "statsOpenMatchIDs"
-    static let favouritesKey = "favouriteTeams"
+    static let favouritesKey = "favouriteTeamIDs"
+    static let autoWatchKey = "autoWatchFavourites"
     static let hiddenKey = "hiddenMatchIDs"
     let refreshSeconds: UInt64 = 10
 
@@ -37,47 +44,59 @@ final class ScoreStore: ObservableObject {
     init() {
         watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
         statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
-        favourites = Set(UserDefaults.standard.stringArray(forKey: Self.favouritesKey) ?? [])
+        favourites = UserDefaults.standard.dictionary(forKey: Self.favouritesKey) as? [String: String] ?? [:]
+        // On unless turned off. bool(forKey:) also reads "NO" passed on the command line.
+        autoWatch = UserDefaults.standard.object(forKey: Self.autoWatchKey) == nil || UserDefaults.standard.bool(forKey: Self.autoWatchKey)
         hidden = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? [])
     }
 
-    // Anything that could put a card on screen: picked matches or favourite teams.
-    var followingAnything: Bool { !watched.isEmpty || !favourites.isEmpty }
+    // Anything that could put a card on screen: picked matches or auto-watched teams.
+    var followingAnything: Bool { !watched.isEmpty || autoWatchingTeams }
 
+    var autoWatchingTeams: Bool { autoWatch && !favourites.isEmpty }
+
+    // Favourite teams' matches first; otherwise the feed's order.
     var watchedMatches: [Match] {
-        matches.filter(isWatched)
+        let shown = matches.filter(isWatched)
+        return shown.filter(hasFavourite) + shown.filter { !hasFavourite($0) }
     }
 
-    // Picked by hand, or one side is a favourite team. Either way, not if the user hid it.
+    // Picked by hand, or auto-watched for a favourite team and not stopped.
     func isWatched(_ match: Match) -> Bool {
-        !hidden.contains(match.id) && (watched.contains(match.id) || hasFavourite(match))
+        watched.contains(match.id) || (autoWatch && hasFavourite(match) && !hidden.contains(match.id))
     }
 
     func hasFavourite(_ match: Match) -> Bool {
-        match.sides.contains { isFavourite($0.name) }
+        match.sides.contains { isFavourite(id: $0.id, name: $0.name) }
     }
 
-    // Case-insensitive, but otherwise exact: "England" doesn't catch "England Women".
-    func isFavourite(_ team: String) -> Bool {
-        favourites.contains { $0.caseInsensitiveCompare(team) == .orderedSame }
+    // By ID. Name only as a fallback when the feed gives no ID; exact (case aside),
+    // so "England" never catches "England Women".
+    func isFavourite(id: String, name: String) -> Bool {
+        if !id.isEmpty { return favourites[id] != nil }
+        return favourites.values.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
-    func toggleFavourite(_ team: String) {
-        if isFavourite(team) {
-            favourites = favourites.filter { $0.caseInsensitiveCompare(team) != .orderedSame }
+    func toggleFavourite(_ team: TeamOption) {
+        if favourites[team.id] != nil {
+            favourites[team.id] = nil
         } else {
-            favourites.insert(team)
+            favourites[team.id] = team.name
+            // Starring a team means "show me their games", including ones stopped before.
+            let theirs = matches.filter { m in m.sides.contains { $0.id == team.id } }.map(\.id)
+            hidden.subtract(theirs)
         }
     }
 
     func toggle(_ match: Match) {
         if isWatched(match) {
             watched.remove(match.id)
-            // A favourite's match would come straight back, so remember it's unwanted.
-            if hasFavourite(match) { hidden.insert(match.id) }
+            // Always remembered, so it stays gone even if a favourite is named in it later.
+            hidden.insert(match.id)
         } else {
+            // Always a real pick, so it stays even if the team is unstarred later.
             hidden.remove(match.id)
-            if !hasFavourite(match) { watched.insert(match.id) }
+            watched.insert(match.id)
         }
     }
 

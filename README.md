@@ -16,9 +16,9 @@ Copy `build/CricketFeed.app` into `/Applications` if you want to keep it.
 ## Use
 
 - Press `+` to pick matches. Press Done when finished.
-- Press the star to choose favourite teams (countries, English counties, or any team in the feed). Their matches show up on their own.
+- Press the star to choose favourite teams (countries, English counties, or any team in the feed). Their matches sit at the top of the match list and the panel. With "Auto-watch my teams' matches" on (the default), they also show up without being picked.
 - Drag the window anywhere to move it.
-- Right-click a match to open it on Cricinfo or stop watching it. Stopping a favourite team's match hides just that match.
+- Right-click a match to open it on Cricinfo or stop watching it. Stopping a favourite team's match hides just that match; tick it in the match list to bring it back.
 - Menu bar icon: show/hide window, quit. There's no Dock icon.
 - Scores refresh every 10 seconds.
 

@@ -1,7 +1,8 @@
 import SwiftUI
 
-// A team you can star. `name` must match the feed's displayName exactly (case aside).
+// A team you can star. Matched to the feed by ESPN team ID.
 struct TeamOption: Hashable {
+    let id: String
     let name: String
     var logo: URL? = nil
 }
@@ -24,8 +25,10 @@ enum TeamCatalogue {
         (1371, "Sussex"), (1428, "Warwickshire"), (1458, "Worcestershire"), (1464, "Yorkshire"),
     ])
 
+    static let all = international + counties
+
     private static func teams(_ list: [(Int, String)]) -> [TeamOption] {
-        list.map { TeamOption(name: $0.1, logo: URL(string: "https://a.espncdn.com/i/teamlogos/cricket/500/\($0.0).png")) }
+        list.map { TeamOption(id: String($0.0), name: $0.1, logo: URL(string: "https://a.espncdn.com/i/teamlogos/cricket/500/\($0.0).png")) }
     }
 }
 
@@ -34,26 +37,37 @@ struct TeamPicker: View {
     var maxHeight: CGFloat = 320
     @State private var search = ""
     @FocusState private var searchFocused: Bool
+    // "Your teams" as it was when the screen opened. Starring or unstarring
+    // changes only the star, so rows never move under the pointer.
+    @State private var pinned: [TeamOption]
+
+    init(store: ScoreStore, maxHeight: CGFloat = 320) {
+        self.store = store
+        self.maxHeight = maxHeight
+        let pool = TeamCatalogue.all + Self.feedTeams(store)
+        _pinned = State(initialValue: store.favourites
+            .map { id, name in pool.first { $0.id == id } ?? TeamOption(id: id, name: name) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+    }
+
+    // Every team in today's feed that has an ID (needed to star it).
+    private static func feedTeams(_ store: ScoreStore) -> [TeamOption] {
+        store.matches.flatMap(\.sides)
+            .filter { !$0.id.isEmpty && !$0.name.isEmpty && $0.name != "?" }
+            .map { TeamOption(id: $0.id, name: $0.name, logo: $0.logo) }
+    }
 
     // Your teams first, then the fixed lists, then anyone else in the feed.
     private var sections: [(title: String, teams: [TeamOption])] {
-        let known = TeamCatalogue.international + TeamCatalogue.counties
         var seen = Set<String>()
         func fresh(_ list: [TeamOption]) -> [TeamOption] {
-            list.filter { seen.insert($0.name.lowercased()).inserted }
+            list.filter { seen.insert($0.id).inserted }
         }
-        // Logos for favourites that came from the feed, so they keep a flag.
-        let feedTeams = store.matches.flatMap(\.sides).map { TeamOption(name: $0.name, logo: $0.logo) }
-        let pool = known + feedTeams
-        let mine = store.favourites.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { name in
-            pool.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } ?? TeamOption(name: name)
-        }
-        let other = feedTeams
-            .filter { $0.name != "?" && !$0.name.isEmpty }
+        let other = Self.feedTeams(store)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        // "Your teams" repeats rows from below on purpose: starring a team never moves it.
+        // "Your teams" repeats rows from below on purpose.
         let all: [(String, [TeamOption])] = [
-            ("Your teams", mine),
+            ("Your teams", pinned),
             ("International", fresh(TeamCatalogue.international)),
             ("English counties", fresh(TeamCatalogue.counties)),
             ("In the feed", fresh(other)),
@@ -74,7 +88,7 @@ struct TeamPicker: View {
     private var rows: [Row] {
         sections.enumerated().flatMap { i, section in
             [Row(id: "#" + section.title, title: section.title, first: i == 0)]
-                + section.teams.map { Row(id: section.title + "/" + $0.name.lowercased(), title: section.title, team: $0) }
+                + section.teams.map { Row(id: section.title + "/" + $0.id, title: section.title, team: $0) }
         }
     }
 
@@ -95,8 +109,8 @@ struct TeamPicker: View {
                     // ("Your teams" and "International"), and a shared ID makes one row vanish.
                     ForEach(rows, id: \.id) { row in
                         if let team = row.team {
-                            TeamRow(team: team, selected: store.isFavourite(team.name)) {
-                                store.toggleFavourite(team.name)
+                            TeamRow(team: team, selected: store.favourites[team.id] != nil) {
+                                store.toggleFavourite(team)
                             }
                         } else {
                             SectionLabel(title: row.title, first: row.first)
@@ -107,10 +121,14 @@ struct TeamPicker: View {
             }
             .frame(height: min(320, maxHeight))
             .bottomFade(true)
-            Text("Their matches show up on their own. No need to pick them.")
-                .font(.system(size: Theme.metaSize))
-                .foregroundStyle(Theme.meta)
+            Toggle("Auto-watch my teams' matches", isOn: $store.autoWatch)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.system(size: Theme.bodySize))
                 .padding(.horizontal, 4)
+                .help(store.autoWatch
+                      ? "Their matches go in your panel without picking them"
+                      : "Their matches only go to the top of Pick matches")
         }
         .onAppear { searchFocused = true }
     }

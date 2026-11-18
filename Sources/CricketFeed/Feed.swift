@@ -50,6 +50,7 @@ struct Competitor: Decodable {
 }
 
 struct Team: Decodable {
+    let id: String?
     let displayName: String?
     let abbreviation: String?
     let logo: String?        // flag for national sides, crest for clubs
@@ -59,6 +60,7 @@ struct Team: Decodable {
 
 struct Match: Identifiable, Hashable {
     struct Side: Hashable {
+        var id: String = ""      // ESPN team ID, same in every competition
         let name: String
         let short: String
         let score: String
@@ -112,6 +114,7 @@ func fetchMatches() async throws -> [Match] {
             let status = comp?.status ?? event.status
             let sides = (comp?.competitors ?? []).map { c in
                 Match.Side(
+                    id: c.team?.id ?? "",
                     name: c.team?.displayName ?? "?",
                     short: c.team?.abbreviation ?? "?",
                     score: c.score ?? "",

@@ -18,11 +18,11 @@ struct ContentView: View {
             header
             switch mode {
             case .matches: MatchPicker(store: store, maxHeight: room.maxListHeight - 36)
-            case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 60)
+            case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 64)
             case .scores: watchedList
             }
             // "Updated 11:28" means nothing with no matches picked.
-            if store.followingAnything || mode == .matches || store.error != nil { footer }
+            if store.followingAnything || mode != .scores || store.error != nil { footer }
         }
         .padding(12)
         .frame(width: Theme.panelWidth)
@@ -94,12 +94,14 @@ struct ContentView: View {
             EmptyStateView(
                 symbol: "figure.cricket",
                 title: "No matches yet",
-                message: "Pick the games you want to follow, or star your favourite teams, and their scores will show here.",
+                message: store.favourites.isEmpty
+                    ? "Pick the games you want to follow, or star your favourite teams, and their scores will show here."
+                    : "Pick the games you want to follow. Your teams' games are at the top of the list.",
                 action: ("Pick matches", { mode = .matches })
             )
         } else if store.lastUpdated == nil && store.error == nil {
             VStack(spacing: 10) {
-                ForEach(0..<min(max(store.watched.count, 1), 2), id: \.self) { _ in SkeletonCard() }
+                ForEach(0..<min(max(store.watched.count + (store.autoWatchingTeams ? 1 : 0), 1), 2), id: \.self) { _ in SkeletonCard() }
             }
             .frame(maxHeight: room.maxListHeight, alignment: .top)
             .clipped()
@@ -109,9 +111,11 @@ struct ContentView: View {
                 title: store.lastUpdated == nil ? "Can't reach the score feed" : "Nothing on right now",
                 message: store.lastUpdated == nil
                     ? "Will keep trying every few seconds."
-                    : store.favourites.isEmpty
+                    : !store.autoWatchingTeams
                         ? "Your picked matches aren't in the feed at the moment."
-                        : "None of your teams are playing right now.",
+                        : store.matches.contains(where: store.hasFavourite)
+                            ? "You've stopped watching your teams' matches."
+                            : "None of your teams are playing right now.",
                 action: store.lastUpdated == nil ? nil : ("Pick matches", { mode = .matches }),
                 tint: store.lastUpdated == nil ? Theme.meta : .accentColor
             )
@@ -338,8 +342,9 @@ struct MatchPicker: View {
     }
 
     private var sections: [(title: String, matches: [Match])] {
-        let groups = Dictionary(grouping: filtered, by: rank)
-        return [(0, "Live"), (1, "Upcoming"), (2, "Finished")].compactMap { key, title in
+        // Favourite teams' matches get their own section at the top.
+        let groups = Dictionary(grouping: filtered) { store.hasFavourite($0) ? -1 : rank($0) }
+        return [(-1, "Your teams"), (0, "Live"), (1, "Upcoming"), (2, "Finished")].compactMap { key, title in
             guard let m = groups[key], !m.isEmpty else { return nil }
             return (title, m)
         }
