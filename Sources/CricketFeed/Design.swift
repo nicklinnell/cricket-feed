@@ -6,13 +6,37 @@ enum Theme {
     static let panelWidth: CGFloat = 300
     static let panelRadius: CGFloat = 16
     static let cardRadius: CGFloat = 11
+
+    // Type scale. Keep to these so sizes read as clear steps.
+    static let metaSize: CGFloat = 10.5    // venue, series, rates, footer
+    static let bodySize: CGFloat = 12      // summary line
+    static let teamSize: CGFloat = 14      // team names
+    static let titleSize: CGFloat = 15     // panel title
+    static let scoreSize: CGFloat = 19     // main score
+
+    // Quiet text (series, venue, rates labels, footer). A fixed grey rather than
+    // the system's vibrant .secondary, which fades to ~3.4:1 inside a mask.
+    // Passes AA (4.5:1) on cards and the panel in both modes.
+    static let meta = Color(nsColor: dynamic(dark: NSColor(white: 0.78, alpha: 1), light: NSColor(white: 0.37, alpha: 1)))
+
+    // Fills (dot, chips) use these strong colours.
     static let live = Color(nsColor: dynamic(dark: .systemRed, light: NSColor(srgbRed: 0.72, green: 0.08, blue: 0.08, alpha: 1)))
-    // Darker orange in light mode so small text stays readable.
     static let paused = Color(nsColor: dynamic(dark: .systemOrange, light: NSColor(srgbRed: 0.56, green: 0.28, blue: 0.0, alpha: 1)))
 
-    // Ball-by-ball chips. Slightly darker in light mode so white text stays readable.
-    static let four = Color(nsColor: dynamic(dark: .systemGreen, light: NSColor(srgbRed: 0.13, green: 0.55, blue: 0.24, alpha: 1)))
-    static let six = Color(nsColor: dynamic(dark: .systemPurple, light: NSColor(srgbRed: 0.50, green: 0.24, blue: 0.75, alpha: 1)))
+    // Text on a 15% tinted pill. Lighter in dark mode so it passes AA (4.5:1).
+    static let liveInk = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1.0, green: 0.75, blue: 0.71, alpha: 1), light: NSColor(srgbRed: 0.72, green: 0.08, blue: 0.08, alpha: 1)))
+    static let pausedInk = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1.0, green: 0.80, blue: 0.55, alpha: 1), light: NSColor(srgbRed: 0.56, green: 0.28, blue: 0.0, alpha: 1)))
+
+    // Ball-by-ball chips. White text passes AA on all three in both modes.
+    static let four = Color(nsColor: NSColor(srgbRed: 0.11, green: 0.48, blue: 0.21, alpha: 1))
+    static let six = Color(nsColor: NSColor(srgbRed: 0.53, green: 0.26, blue: 0.75, alpha: 1))
+    static let wicket = Color(nsColor: NSColor(srgbRed: 0.76, green: 0.13, blue: 0.13, alpha: 1))
+
+    // Cards: near-white sheets in light mode, soft lift in dark. Live cards a touch brighter.
+    static let cardFill = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.045), light: NSColor(white: 1, alpha: 0.45)))
+    static let cardFillLive = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.08), light: NSColor(white: 1, alpha: 0.96)))
+    static let cardStroke = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.08), light: NSColor(white: 0, alpha: 0.08)))
+    static let hairline = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.09), light: NSColor(white: 0, alpha: 0.08)))
 
     private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
@@ -98,11 +122,13 @@ struct StatusPill: View {
 
     private var phase: MatchPhase { MatchPhase(match) }
 
-    private var tint: Color {
+    private var tinted: Bool { phase == .live || phase == .paused }
+
+    private var ink: Color {
         switch phase {
-        case .live: Theme.live
-        case .paused: Theme.paused
-        case .upcoming, .finished: .secondary
+        case .live: Theme.liveInk
+        case .paused: Theme.pausedInk
+        case .upcoming, .finished: Theme.meta
         }
     }
 
@@ -110,15 +136,15 @@ struct StatusPill: View {
         HStack(spacing: 4) {
             if phase == .live { LiveDot().id(reduceMotion) }
             Text(match.stateLabel.isEmpty ? "Unknown" : match.stateLabel)
-                .font(.system(size: 9.5, weight: .bold))
+                .font(.system(size: 10, weight: tinted ? .bold : .semibold))
                 .textCase(.uppercase)
-                .kerning(0.4)
+                .kerning(0.5)
                 .lineLimit(1)
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2.5)
-        .background(tint.opacity(phase == .live || phase == .paused ? 0.15 : 0.10), in: Capsule())
+        .foregroundStyle(ink)
+        .padding(.horizontal, tinted ? 7 : 0)
+        .padding(.vertical, 3)
+        .background(tinted ? AnyShapeStyle((phase == .live ? Theme.live : Theme.paused).opacity(0.15)) : AnyShapeStyle(.clear), in: Capsule())
         .fixedSize()
     }
 }
@@ -128,10 +154,12 @@ struct StatusPill: View {
 struct SideRow: View {
     let side: Match.Side
     var batting = false
+    // Live match where the other side is batting: this row steps back.
+    var quiet = false
 
     var body: some View {
         let parts = ScoreParts(side.score)
-        VStack(alignment: .trailing, spacing: 1) {
+        VStack(alignment: .trailing, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 // Full name if it fits, else the feed's short code.
                 ViewThatFits(in: .horizontal) {
@@ -139,20 +167,22 @@ struct SideRow: View {
                     if !shortName.isEmpty { Text(shortName).lineLimit(1) }
                     Text(side.name).lineLimit(1).truncationMode(.tail)
                 }
-                .font(.system(size: 13, weight: batting ? .semibold : .regular))
+                .font(.system(size: Theme.teamSize, weight: batting ? .semibold : .regular))
+                .foregroundStyle(quiet ? Theme.meta : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(side.name)
                 if !parts.earlier.isEmpty {
                     Text(parts.earlier)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(Theme.meta)
                         .monospacedDigit()
                         .fixedSize()
                 }
                 if !parts.main.isEmpty {
                     // Unusual long strings drop to a smaller size and can shrink, so they never overflow.
                     Text(parts.main)
-                        .font(.system(size: parts.main.count > 9 ? 13 : 17, weight: .semibold, design: .rounded))
+                        .font(.system(size: parts.main.count > 9 ? Theme.teamSize : Theme.scoreSize, weight: batting ? .bold : .semibold, design: .rounded))
+                        .foregroundStyle(quiet ? Theme.meta : Color.primary)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -161,14 +191,14 @@ struct SideRow: View {
             }
             if !parts.detail.isEmpty {
                 Text(parts.detail)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: Theme.metaSize))
+                    .foregroundStyle(Theme.meta)
                     .monospacedDigit()
                     .lineLimit(1)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(side.score.isEmpty ? side.name : "\(side.name), \(side.score)")
+        .accessibilityLabel(side.score.isEmpty ? side.name : "\(side.name), \(side.score)" + (batting ? ", batting" : ""))
     }
 
     private var shortName: String {
@@ -186,7 +216,7 @@ struct IconButtonStyle: ButtonStyle {
         HoverPlate(pressed: configuration.isPressed, radius: 7) {
             configuration.label
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.meta)
                 .opacity(isEnabled ? 1 : 0.45)
                 .frame(width: 24, height: 24)
         }
@@ -234,15 +264,20 @@ struct HoverPlate<Content: View>: View {
 
 // MARK: - Placeholders
 
+// Same shape as a real card, so the panel barely moves when scores land.
 struct SkeletonCard: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            bar(width: 140, height: 8)
-            HStack { bar(width: 90, height: 11); Spacer(); bar(width: 44, height: 14) }
-            HStack { bar(width: 76, height: 11); Spacer(); bar(width: 56, height: 14) }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack { bar(width: 130, height: 9); Spacer(); bar(width: 40, height: 14) }
+            bar(width: 170, height: 7).padding(.top, 6)
+            HStack { bar(width: 110, height: 14); Spacer(); bar(width: 50, height: 19) }.padding(.top, 14)
+            HStack { bar(width: 90, height: 14); Spacer(); bar(width: 42, height: 19) }.padding(.top, 8)
+            bar(width: 180, height: 10).padding(.top, 22)
+            bar(width: 150, height: 9).padding(.top, 8)
         }
-        .padding(10)
+        .padding(12)
         .cardBackground()
+        .accessibilityHidden(true)
     }
 
     private func bar(width: CGFloat, height: CGFloat) -> some View {
@@ -257,39 +292,43 @@ struct EmptyStateView: View {
     let title: String
     let message: String
     var action: (title: String, run: () -> Void)?
+    // Blue for an invitation, grey for problems.
+    var tint: Color = .accentColor
 
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 28, weight: .regular))
+                .font(.system(size: 20, weight: .medium))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 2)
+                .foregroundStyle(tint)
+                .frame(width: 46, height: 46)
+                .background(tint.opacity(0.12), in: Circle())
+                .padding(.bottom, 6)
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
             Text(message)
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
+                .font(.system(size: Theme.bodySize))
+                .foregroundStyle(Theme.meta)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let action {
                 Button(action.title, action: action.run)
                     .buttonStyle(PillButtonStyle())
-                    .padding(.top, 6)
+                    .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 16)
     }
 }
 
 extension View {
-    func cardBackground() -> some View {
+    func cardBackground(prominent: Bool = false) -> some View {
         background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
+                .fill(prominent ? Theme.cardFillLive : Theme.cardFill)
+                .strokeBorder(Theme.cardStroke, lineWidth: 0.5)
         )
     }
 }

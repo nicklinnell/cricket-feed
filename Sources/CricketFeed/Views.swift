@@ -9,16 +9,18 @@ struct ContentView: View {
     @State private var refreshing = false
     @State private var spin = 0.0
     @State private var listHeight: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             if picking {
-                MatchPicker(store: store, maxHeight: room.maxListHeight - 34)
+                MatchPicker(store: store, maxHeight: room.maxListHeight - 36)
             } else {
                 watchedList
             }
-            footer
+            // "Updated 11:28" means nothing with no matches picked.
+            if !store.watched.isEmpty || picking || store.error != nil { footer }
         }
         .padding(12)
         .frame(width: Theme.panelWidth)
@@ -34,7 +36,7 @@ struct ContentView: View {
     private var header: some View {
         HStack(spacing: 4) {
             Text(picking ? "Pick matches" : "Cricket")
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .font(.system(size: Theme.titleSize, weight: .semibold, design: .rounded))
             Spacer()
             if picking {
                 Button("Done") { picking = false }
@@ -64,7 +66,7 @@ struct ContentView: View {
 
     private func refreshNow() async {
         refreshing = true
-        withAnimation(.linear(duration: 0.6)) { spin += 360 }
+        if !reduceMotion { withAnimation(.linear(duration: 0.6)) { spin += 360 } }
         await store.refresh()
         refreshing = false
     }
@@ -80,7 +82,11 @@ struct ContentView: View {
                 action: ("Pick matches", { picking = true })
             )
         } else if store.lastUpdated == nil && store.error == nil {
-            ForEach(0..<min(store.watched.count, 2), id: \.self) { _ in SkeletonCard() }
+            VStack(spacing: 10) {
+                ForEach(0..<min(store.watched.count, 2), id: \.self) { _ in SkeletonCard() }
+            }
+            .frame(maxHeight: room.maxListHeight, alignment: .top)
+            .clipped()
         } else if items.isEmpty {
             EmptyStateView(
                 symbol: store.lastUpdated == nil ? "wifi.slash" : "calendar.badge.clock",
@@ -88,7 +94,8 @@ struct ContentView: View {
                 message: store.lastUpdated == nil
                     ? "Will keep trying every few seconds."
                     : "Your picked matches aren't in the feed at the moment.",
-                action: store.lastUpdated == nil ? nil : ("Pick matches", { picking = true })
+                action: store.lastUpdated == nil ? nil : ("Pick matches", { picking = true }),
+                tint: store.lastUpdated == nil ? Theme.meta : .accentColor
             )
         } else {
             // Scrolls only once the cards would be taller than the screen allows.
@@ -108,13 +115,7 @@ struct ContentView: View {
             .scrollDisabled(!scrolls)
             .frame(height: min(max(listHeight, 1), room.maxListHeight))
             // Soft fade at the bottom so a cut-off card reads as "more below".
-            .mask {
-                VStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .black.opacity(scrolls ? 0 : 1)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 18)
-                }
-            }
+            .bottomFade(scrolls)
         }
     }
 
@@ -122,8 +123,9 @@ struct ContentView: View {
         HStack(spacing: 5) {
             if let err = store.error {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.paused)
+                    .foregroundStyle(Theme.pausedInk)
                 Text(store.lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline")
+                    .foregroundStyle(Theme.pausedInk)
                     .help(err)
                     .accessibilityHint(err)
             } else if let t = store.lastUpdated {
@@ -134,10 +136,10 @@ struct ContentView: View {
             }
             Spacer()
         }
-        .font(.system(size: 10.5))
-        .foregroundStyle(.secondary)
+        .font(.system(size: Theme.metaSize))
+        .foregroundStyle(Theme.meta)
         .lineLimit(1)
-        .padding(.horizontal, 2)
+        .padding(.horizontal, 4)
     }
 
     private var scrolls: Bool { listHeight > room.maxListHeight }
@@ -151,55 +153,86 @@ struct MatchCard: View {
     let match: Match
     var detail: LiveDetail?
 
+    private var phase: MatchPhase { MatchPhase(match) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .center, spacing: 6) {
-                    Text(match.detail.isEmpty ? match.league : match.detail + dayNight)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    StatusPill(match: match)
-                }
-                if !match.detail.isEmpty {
-                    Text(match.league)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if !venue.isEmpty {
-                    Text(venue)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.bottom, 2)
-            ForEach(match.sides, id: \.self) { side in
-                SideRow(side: side, batting: battingSide == side)
-            }
-            if !summaryText.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summaryText)
-                        .font(.system(size: 11.5, weight: inPlay ? .medium : .regular))
-                        .foregroundStyle(inPlay ? .primary : .secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            // Teams and scores: the part the eye should hit first.
+            VStack(alignment: .leading, spacing: 6) {
+                if match.sides.isEmpty {
+                    Text(match.title)
+                        .font(.system(size: Theme.teamSize, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(match.sides, id: \.self) { side in
+                    SideRow(side: side, batting: battingSide == side, quiet: battingSide != nil && battingSide != side)
+                }
+            }
+            .padding(.top, 12)
+            if !summaryText.isEmpty || !(liveDetail?.overs.isEmpty ?? true) || !(liveDetail?.rates.isEmpty ?? true) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !summaryText.isEmpty {
+                        Text(summaryText)
+                            .font(.system(size: Theme.bodySize, weight: summaryStrong ? .medium : .regular))
+                            .foregroundStyle(summaryStrong ? Color.primary : Theme.meta)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let live = liveDetail, !live.rates.isEmpty {
                         RatesRow(rates: live.rates)
                     }
+                    if let overs = liveDetail?.overs, !overs.isEmpty {
+                        OversLine(overs: overs)
+                            .padding(.top, 2)
+                    }
                 }
-                .padding(.top, 5)
+                .padding(.top, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .top) { Hairline() }
-            }
-            if let overs = liveDetail?.overs, !overs.isEmpty {
-                OversLine(overs: overs)
-                    .padding(.top, 6)
-                .overlay(alignment: .top) { Hairline() }
+                .overlay(alignment: .top) { Hairline().offset(y: -0.5) }
+                .padding(.top, 10)
             }
         }
-        .padding(10)
-        .cardBackground()
+        .padding(12)
+        .cardBackground(prominent: phase == .live || phase == .paused)
+        .help(match.fullDescription)
+    }
+
+    // "1st Test (D/N) · Johannesburg"   [LIVE]
+    // "Bangladesh tour of South Africa 2026/27"   (date first for upcoming games)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 6) {
+                (Text(title)
+                    .foregroundStyle(.primary)
+                 + Text(city.isEmpty ? "" : (title.isEmpty ? city : "  ·  " + city))
+                    .foregroundStyle(Theme.meta))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                StatusPill(match: match)
+            }
+            if !secondLine.isEmpty {
+                Text(secondLine)
+                    .font(.system(size: Theme.metaSize))
+                    .foregroundStyle(Theme.meta)
+                    .lineLimit(1)
+            }
+        }
+        // VoiceOver gets the full description (with the date), not the trimmed lines.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([match.fullDescription.isEmpty ? title : match.fullDescription, match.stateLabel].filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+
+    private var title: String {
+        match.detail.isEmpty ? match.league : match.detail + dayNight
+    }
+
+    private var secondLine: String {
+        let league = match.detail.isEmpty ? "" : match.league
+        if phase == .upcoming, !date.isEmpty {
+            return [date, league].filter { !$0.isEmpty }.joined(separator: "  ·  ")
+        }
+        return league
     }
 
     // Ball-by-ball extras only while the match is in play (live or a break).
@@ -210,6 +243,15 @@ struct MatchCard: View {
     // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
     private var summaryText: String {
         liveDetail?.chase ?? match.summary
+    }
+
+    // Results and live play read as headline text; toss news and start times stay quiet.
+    private var summaryStrong: Bool {
+        switch phase {
+        case .finished: true
+        case .live, .paused: !match.summary.localizedCaseInsensitiveContains("won toss") || liveDetail?.chase != nil
+        case .upcoming: false
+        }
     }
 
     // "3rd ODI (D/N), England tour of Australia at Hobart, Nov 18 2026"
@@ -227,14 +269,20 @@ struct MatchCard: View {
         return String(match.fullDescription[r.upperBound...])
     }
 
-    // Emphasise the summary only for live play, and not for stale toss news.
-    private var inPlay: Bool {
-        MatchPhase(match) == .live && !match.summary.localizedCaseInsensitiveContains("won toss")
+    // "Hobart, Nov 18 2026" -> city "Hobart", date "Nov 18 2026". No comma: all of it is the city.
+    private var city: String {
+        guard let comma = venue.firstIndex(of: ",") else { return venue }
+        return String(venue[..<comma])
+    }
+
+    private var date: String {
+        guard let comma = venue.firstIndex(of: ",") else { return "" }
+        return venue[venue.index(after: comma)...].trimmingCharacters(in: .whitespaces)
     }
 
     // Best guess: in live play, the only side whose score has overs in brackets is batting.
     private var battingSide: Match.Side? {
-        guard MatchPhase(match) == .live else { return nil }
+        guard phase == .live || (phase == .paused && !match.stateLabel.localizedCaseInsensitiveContains("innings")) else { return nil }
         let withOvers = match.sides.filter { !ScoreParts($0.score).detail.isEmpty }
         return withOvers.count == 1 ? withOvers[0] : nil
     }
@@ -280,7 +328,8 @@ struct MatchPicker: View {
                             EmptyStateView(
                                 symbol: store.error == nil ? "hourglass" : "wifi.slash",
                                 title: store.error == nil ? "Fetching matches" : "Can't reach the score feed",
-                                message: store.error == nil ? "One moment." : "Will keep trying every few seconds."
+                                message: store.error == nil ? "One moment." : "Will keep trying every few seconds.",
+                                tint: Theme.meta
                             )
                         } else {
                             EmptyStateView(
@@ -288,16 +337,17 @@ struct MatchPicker: View {
                                 title: store.matches.isEmpty ? "No matches in the feed" : "No results",
                                 message: store.matches.isEmpty
                                     ? "Check back soon."
-                                    : "Nothing matches \u{201C}\(search)\u{201D}."
+                                    : "Nothing matches \u{201C}\(search)\u{201D}.",
+                                tint: Theme.meta
                             )
                         }
                     }
                     ForEach(sections, id: \.title) { section in
                         Text(section.title)
-                            .font(.system(size: 9.5, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .textCase(.uppercase)
                             .kerning(0.6)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.meta)
                             .padding(.horizontal, 8)
                             .padding(.top, section.title == sections.first?.title ? 2 : 10)
                             .padding(.bottom, 3)
@@ -308,8 +358,11 @@ struct MatchPicker: View {
                         }
                     }
                 }
+                .padding(.bottom, 18) // last row can scroll clear of the fade
             }
             .frame(height: min(320, maxHeight))
+            // Fade at the bottom so a cut-off row reads as "more below".
+            .bottomFade(true)
         }
         .onAppear { searchFocused = true }
     }
@@ -318,22 +371,23 @@ struct MatchPicker: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.meta)
             TextField("Search teams or series", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
             if !search.isEmpty {
                 Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.meta)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 26)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.cardStroke, lineWidth: 0.5))
     }
 }
 
@@ -346,25 +400,35 @@ struct PickerRow: View {
         Button(action: toggle) {
             HStack(spacing: 9) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(match.title)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
+                    // One team per line so every row has the same shape.
+                    Group {
+                        if match.sides.count == 2 {
+                            ForEach(match.sides, id: \.self) { Text($0.name).lineLimit(1) }
+                        } else {
+                            Text(match.title).lineLimit(2)
+                        }
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
                     Text([match.detail, match.league].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: Theme.metaSize))
+                        .foregroundStyle(Theme.meta)
                         .lineLimit(1)
+                        .padding(.top, 2)
                 }
+                .help(match.fullDescription)
                 Spacer(minLength: 4)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15))
-                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                    .font(.system(size: 17))
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Theme.meta))
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(PickerRowStyle(selected: selected))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([match.title, match.detail, match.league].filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -382,7 +446,7 @@ struct PickerRowStyle: ButtonStyle {
 
 struct Hairline: View {
     var body: some View {
-        Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
+        Rectangle().fill(Theme.hairline).frame(height: 0.5)
     }
 }
 
@@ -391,20 +455,31 @@ struct RatesRow: View {
     let rates: [(label: String, value: String)]
 
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(rates, id: \.label) { rate in
-                HStack(spacing: 3) {
-                    Text(rate.label).foregroundStyle(.secondary)
-                    Text(rate.value).fontWeight(.medium)
+        // Drop rates from the end (Last 5 ov first) rather than spill past the card.
+        ViewThatFits(in: .horizontal) {
+            ForEach((1...max(rates.count, 1)).reversed(), id: \.self) { n in
+                row(Array(rates.prefix(n)))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rates.map { "\($0.label) \($0.value)" }.joined(separator: ", "))
+    }
+
+    private func row(_ shown: [(label: String, value: String)]) -> some View {
+        HStack(spacing: 12) {
+            ForEach(shown, id: \.label) { rate in
+                HStack(spacing: 4) {
+                    Text(rate.label)
+                        .font(.system(size: Theme.metaSize))
+                        .foregroundStyle(Theme.meta)
+                    Text(rate.value)
+                        .font(.system(size: 11.5, weight: .semibold))
                 }
                 .fixedSize()
             }
         }
-        .font(.system(size: 10.5))
         .monospacedDigit()
         .lineLimit(1)
-        .minimumScaleFactor(0.85)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -526,20 +601,20 @@ struct OverGroup: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(ordinal(over.number))
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
+                .font(.system(size: Theme.metaSize, weight: .medium))
+                .foregroundStyle(Theme.meta)
                 .monospacedDigit()
                 .fixedSize()
                 .padding(.trailing, 2)
             ForEach(Array(over.balls.enumerated()), id: \.offset) { _, ball in
                 BallChip(ball: ball)
             }
-            Text("\(over.runs)")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
+            Text("= \(over.runs)")
+                .font(.system(size: Theme.metaSize, weight: .medium))
+                .foregroundStyle(Theme.meta)
                 .monospacedDigit()
                 .fixedSize()
-                .padding(.leading, 2)
+                .padding(.leading, 3)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
@@ -557,21 +632,27 @@ struct BallChip: View {
 
     var body: some View {
         Text(ball.label)
-            .font(.system(size: ball.label.count > 2 ? 8.5 : 10.5, weight: .semibold, design: .rounded))
+            .font(.system(size: ball.label.count > 2 ? 9 : 11, weight: .bold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(fg)
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, ball.label.count > 2 ? 2.5 : 0)
-            .frame(minWidth: 18, minHeight: 18)
-            .background(bg, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .padding(.horizontal, ball.label.count > 2 ? 3.5 : 0)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(bg, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                if ball.kind == .dot || ball.kind == .runs {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                }
+            }
     }
 
     private var bg: Color {
         switch ball.kind {
         case .four: Theme.four
         case .six: Theme.six
-        case .wicket: Theme.live
+        case .wicket: Theme.wicket
         case .extra: Theme.paused.opacity(0.15)
         case .dot, .runs: Color.primary.opacity(0.07)
         }
@@ -580,9 +661,23 @@ struct BallChip: View {
     private var fg: Color {
         switch ball.kind {
         case .four, .six, .wicket: .white
-        case .extra: Theme.paused
-        case .dot: .secondary
+        case .extra: Theme.pausedInk
+        case .dot: Theme.meta
         case .runs: .primary
+        }
+    }
+}
+
+extension View {
+    // Fades the bottom 18pt out when `on`. Always the same view, so toggling it
+    // doesn't rebuild what's inside (scroll spot, live dot, overs line state).
+    func bottomFade(_ on: Bool) -> some View {
+        mask {
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .black.opacity(on ? 0 : 1)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 18)
+            }
         }
     }
 }
