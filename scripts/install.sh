@@ -36,7 +36,7 @@ STAGE="$WORK/$APP_NAME"
 OLD="$WORK/old.app"
 cleanup() {
     # If we stopped between the two moves, put the old app back.
-    if [[ ! -e "$TARGET" && -e "$OLD" ]]; then
+    if [[ ! -e "$TARGET" && ! -L "$TARGET" ]] && [[ -e "$OLD" || -L "$OLD" ]]; then
         if ! mv "$OLD" "$TARGET"; then
             echo "Old app left at $OLD" >&2
             return
@@ -52,10 +52,12 @@ trap 'exit 130' INT TERM HUP
 ditto "build/$APP_NAME" "$STAGE"
 codesign --verify --strict "$STAGE"
 
-if [[ -e "$TARGET" ]]; then
+if [[ -e "$TARGET" || -L "$TARGET" ]]; then
     mv "$TARGET" "$OLD"
 fi
 mv "$STAGE" "$TARGET"
+# Catch a clash with another install running at the same time.
+codesign --verify --strict "$TARGET"
 
 # Tell Finder/Launchpad about the new bundle so the icon shows straight away.
 # Only for real app folders, so test installs don't pile up in macOS's app list.
