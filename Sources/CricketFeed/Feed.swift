@@ -52,6 +52,7 @@ struct Competitor: Decodable {
 struct Team: Decodable {
     let displayName: String?
     let abbreviation: String?
+    let logo: String?        // flag for national sides, crest for clubs
 }
 
 // MARK: - What the UI shows
@@ -61,6 +62,7 @@ struct Match: Identifiable, Hashable {
         let name: String
         let short: String
         let score: String
+        var logo: URL? = nil
     }
 
     let id: String
@@ -112,7 +114,8 @@ func fetchMatches() async throws -> [Match] {
                 Match.Side(
                     name: c.team?.displayName ?? "?",
                     short: c.team?.abbreviation ?? "?",
-                    score: c.score ?? ""
+                    score: c.score ?? "",
+                    logo: c.team?.logo.flatMap(URL.init(string:))
                 )
             }
             result.append(Match(

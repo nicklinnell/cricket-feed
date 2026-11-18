@@ -161,6 +161,10 @@ struct SideRow: View {
         let parts = ScoreParts(side.score)
         VStack(alignment: .trailing, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let logo = side.logo {
+                    TeamFlag(url: logo)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                }
                 // Full name if it fits, else the feed's short code.
                 ViewThatFits(in: .horizontal) {
                     Text(side.name).lineLimit(1)
@@ -205,6 +209,75 @@ struct SideRow: View {
         let s = side.short.trimmingCharacters(in: .whitespaces)
         return s == "?" || s == side.name ? "" : s
     }
+}
+
+// Team flag (or club crest) from the feed. Cached so refreshes don't flicker.
+struct TeamFlag: View {
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: 20, height: 14)
+        .accessibilityHidden(true)
+        .task(id: url) { image = await FlagCache.shared.image(for: url) }
+    }
+}
+
+actor FlagCache {
+    static let shared = FlagCache()
+    private var images: [URL: NSImage] = [:]
+    private var misses: Set<URL> = []
+
+    func image(for url: URL) async -> NSImage? {
+        if let hit = images[url] { return hit }
+        if misses.contains(url) { return nil }
+        // Ask ESPN's image server for a small copy rather than the 500px original.
+        var comps = URLComponents(string: "https://a.espncdn.com/combiner/i")
+        comps?.queryItems = [.init(name: "img", value: url.path), .init(name: "w", value: "80"), .init(name: "h", value: "80")]
+        let small = url.host == "a.espncdn.com" ? (comps?.url ?? url) : url
+        for candidate in [small, url] {
+            if let (data, resp) = try? await URLSession.shared.data(from: candidate),
+               (resp as? HTTPURLResponse)?.statusCode == 200,
+               let img = NSImage(data: data) {
+                let trimmed = trimTransparentEdges(img)
+                images[url] = trimmed
+                return trimmed
+            }
+            if candidate == url { break }
+        }
+        misses.insert(url)
+        return nil
+    }
+}
+
+// ESPN logos sit inside a square with clear padding. Crop to the visible part
+// so a 3:2 flag fills its slot instead of shrinking to a sliver.
+private func trimTransparentEdges(_ image: NSImage) -> NSImage {
+    guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+    let w = cg.width, h = cg.height
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return image }
+    ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+    var minX = w, minY = h, maxX = -1, maxY = -1
+    for y in 0..<h {
+        for x in 0..<w where px[(y * w + x) * 4 + 3] > 8 {
+            minX = min(minX, x); maxX = max(maxX, x)
+            minY = min(minY, y); maxY = max(maxY, y)
+        }
+    }
+    guard maxX >= minX, maxY >= minY,
+          let cropped = cg.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1))
+    else { return image }
+    return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
 }
 
 // MARK: - Buttons and hover
