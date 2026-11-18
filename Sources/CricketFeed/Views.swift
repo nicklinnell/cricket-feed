@@ -244,8 +244,9 @@ struct MatchCard: View {
     }
 
     // Ball-by-ball extras only while the match is in play (live or a break).
+    // Hidden as soon as a new innings starts, so last innings' players never sit under the new score.
     private var liveDetail: LiveDetail? {
-        match.isLive ? detail : nil
+        match.isLive && detail?.period == match.period ? detail : nil
     }
 
     // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
@@ -478,10 +479,10 @@ struct PlayersSection: View {
                 .foregroundStyle(Theme.meta)
                 .padding(.horizontal, 6)
                 .frame(height: 26)
-                // Faint resting fill so it reads as a button, not a caption.
-                .background(open ? Color.clear : Theme.band.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             .buttonStyle(PlainHoverStyle())
+            // Faint resting fill so it reads as a button, not a caption. Sits under the hover fill.
+            .background(open ? Color.clear : Theme.band.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .padding(.horizontal, -6)
             .accessibilityLabel(open ? "Hide batters and bowlers" : "Show batters and bowlers")
             .help(open ? "Hide batters and bowlers" : "Show batters and bowlers")
@@ -508,7 +509,7 @@ struct PlayersTable: View {
     let bowlers: [BowlerLine]
 
     // Fixed number columns so both halves line up.
-    private static let widths: [CGFloat] = [26, 26, 22, 22, 50]
+    private static let widths: [CGFloat] = [28, 26, 24, 22, 48]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -519,7 +520,7 @@ struct PlayersTable: View {
                         ("\(b.runs)", true), ("\(b.balls)", false), ("\(b.fours)", false), ("\(b.sixes)", false), (b.strikeRate, false),
                     ])
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes, strike rate \(b.strikeRate)")
+                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes" + (b.balls > 0 ? ", strike rate \(b.strikeRate)" : ""))
                 }
             }
             if !bowlers.isEmpty {
@@ -530,7 +531,7 @@ struct PlayersTable: View {
                         (b.overs, false), ("\(b.maidens)", false), ("\(b.conceded)", false), ("\(b.wickets)", true), (b.economy, false),
                     ])
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets, economy \(b.economy)")
+                    .accessibilityLabel("\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets" + (b.balls > 0 ? ", economy \(b.economy)" : ""))
                 }
             }
         }
@@ -563,7 +564,8 @@ struct PlayersTable: View {
                 ViewThatFits(in: .horizontal) {
                     Text(name)
                     Text(initialled(name))
-                    Text(short.isEmpty ? initialled(name) : short).truncationMode(.tail)
+                    // Feed short name only when it really is shorter ("Shanto"); it's often empty or the full name.
+                    Text(!short.isEmpty && short.count < initialled(name).count ? short : initialled(name)).truncationMode(.tail)
                 }
                 .lineLimit(1)
                 // Always there, so a name doesn't jump between full and short as strike changes.

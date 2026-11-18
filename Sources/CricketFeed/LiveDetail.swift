@@ -167,7 +167,10 @@ struct BowlerLine: Hashable {
 // Batters keep the order they first show up in. The feed has no batting
 // position, so this is a best guess; ScoreStore keeps it steady across refreshes.
 func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerLine]) {
-    guard let latest = items.last(where: { $0.batsman?.athlete?.id != nil }) else { return ([], []) }
+    guard let at = items.lastIndex(where: { $0.batsman?.athlete?.id != nil }) else { return ([], []) }
+    let latest = items[at]
+    // A later item that names no players but records a wicket still counts.
+    let laterWicket = items[(at + 1)...].contains { $0.dismissal?.dismissal == true }
 
     func batter(_ b: PBPBatter?) -> BatterLine? {
         guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { return nil }
@@ -181,7 +184,9 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     }
 
     var batters = [batter(latest.batsman), batter(latest.otherBatsman)].compactMap { $0 }
-    if latest.dismissal?.dismissal == true {
+    if laterWicket {
+        // Don't know who is out, so leave both rows but drop the strike mark.
+    } else if latest.dismissal?.dismissal == true {
         // The new batter isn't in the feed until they face. Show who's left,
         // with no strike mark (who faces next depends on whether they crossed).
         if let out = latest.dismissal?.batsman?.athlete?.id { batters.removeAll { $0.id == out } }
@@ -257,7 +262,8 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     for p in firstPage...lastPage {
         items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
     }
-    guard let latest = items.last else { return nil }
+    // The feed sometimes ends with an empty filler item (no players, zeroed rates). Skip it.
+    guard let latest = items.last(where: { $0.batsman?.athlete?.id != nil }) ?? items.last else { return nil }
 
     // Group balls by over number.
     var byOver: [Int: [Ball]] = [:]
