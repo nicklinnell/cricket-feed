@@ -7,12 +7,12 @@ if (( $# > 0 )) && [[ -z "$1" ]]; then
     echo "Destination folder is empty." >&2
     exit 1
 fi
-# Make the destination absolute before we cd into the repo.
-DEST="${${1:-/Applications}:A}"
+# Make the destination a real absolute path (symlinks resolved) before we cd into the repo.
+DEST="${${1:-/Applications}:P}"
 APP_NAME=CricketFeed.app
 
 cd "$(dirname "$0")/.."
-REPO="$PWD"
+REPO="${PWD:P}"
 
 if [[ ! -d "$DEST" ]]; then
     echo "No such folder: $DEST" >&2
@@ -30,10 +30,22 @@ fi
 ./scripts/build-app.sh
 
 TARGET="$DEST/$APP_NAME"
-STAGE="$DEST/.$APP_NAME.installing"
-OLD="$DEST/.$APP_NAME.old"
-trap 'rm -rf "$STAGE" "$OLD"' EXIT
-rm -rf "$STAGE" "$OLD"
+# Private work folder per run, next to the target, so the final swap is a same-disk rename.
+WORK="$(mktemp -d "$DEST/.CricketFeed-install.XXXXXX")"
+STAGE="$WORK/$APP_NAME"
+OLD="$WORK/old.app"
+cleanup() {
+    # If we stopped between the two moves, put the old app back.
+    if [[ ! -e "$TARGET" && -e "$OLD" ]]; then
+        if ! mv "$OLD" "$TARGET"; then
+            echo "Old app left at $OLD" >&2
+            return
+        fi
+    fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
 # Copy next to the target first, so a failed copy leaves the old app alone.
 # ditto keeps the code signature and bundle metadata intact.

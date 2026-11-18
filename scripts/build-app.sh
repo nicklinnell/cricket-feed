@@ -3,6 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+ICON_SRC=assets/icon-1024.png
+if [[ ! -f "$ICON_SRC" ]]; then
+    echo "Missing $ICON_SRC" >&2
+    exit 1
+fi
+
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/CricketFeed"
 
@@ -13,11 +19,6 @@ cp "$BIN" "$APP/Contents/MacOS/CricketFeed"
 
 # App icon: assets/icon-1024.png -> AppIcon.icns.
 # Only uses tools that ship with macOS (sips, iconutil).
-ICON_SRC=assets/icon-1024.png
-if [[ ! -f "$ICON_SRC" ]]; then
-    echo "Missing $ICON_SRC" >&2
-    exit 1
-fi
 ICON_TMP="$(mktemp -d)"
 trap 'rm -rf "$ICON_TMP"' EXIT
 ICONSET="$ICON_TMP/AppIcon.iconset"
