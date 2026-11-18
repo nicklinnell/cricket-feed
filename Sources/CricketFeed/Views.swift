@@ -483,8 +483,9 @@ struct RatesRow: View {
     }
 }
 
-// Every over on one line. The current over sits at the right edge and its
-// balls build towards the left. Older overs sit off-screen to the right.
+// Every over on one line, newest first. The current over sits at the left edge.
+// Inside each over the newest ball comes straight after the over number, so
+// older balls get pushed right. Older overs sit off-screen to the right.
 // Trackpad users can swipe sideways.
 // Mouse users: click the line, then the scroll wheel moves it left/right.
 struct OversLine: View {
@@ -498,11 +499,11 @@ struct OversLine: View {
                 HStack(spacing: 0) {
                     ForEach(Array(overs.reversed()), id: \.number) { over in
                         if over.number == overs.last?.number {
-                            // Current over fills the visible width, right-aligned,
-                            // so new balls appear on the right and push leftwards.
+                            // Current over fills the visible width, left-aligned,
+                            // so older overs start off-screen to the right.
                             OverGroup(over: over)
-                                .padding(.trailing, 12)
-                                .containerRelativeFrame(.horizontal, alignment: .trailing)
+                                .padding(.leading, 12)
+                                .containerRelativeFrame(.horizontal, alignment: .leading)
                         } else {
                             OverGroup(over: over)
                                 .padding(.leading, 8)
@@ -519,7 +520,6 @@ struct OversLine: View {
             .defaultScrollAnchor(.leading)
             .mask {
                 // Fade on the right so older overs read as "more this way".
-                // The current over is inset 12pt so the fade doesn't cover it.
                 HStack(spacing: 0) {
                     Rectangle()
                     LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .leading, endPoint: .trailing)
@@ -606,7 +606,8 @@ struct OverGroup: View {
                 .monospacedDigit()
                 .fixedSize()
                 .padding(.trailing, 2)
-            ForEach(Array(over.balls.enumerated()), id: \.offset) { _, ball in
+            // Newest ball first, right after the over number.
+            ForEach(Array(over.balls.enumerated().reversed()), id: \.offset) { _, ball in
                 BallChip(ball: ball)
             }
             Text("= \(over.runs)")
