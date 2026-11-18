@@ -61,20 +61,15 @@ final class ScoreStore: ObservableObject {
         return shown.filter(hasFavourite) + shown.filter { !hasFavourite($0) }
     }
 
-    // Picked by hand, or auto-watched for a favourite team and not stopped.
+    // Picked by hand, or auto-watched for a favourite team. A stopped match stays
+    // stopped until it's ticked again: `hidden` always wins.
     func isWatched(_ match: Match) -> Bool {
-        watched.contains(match.id) || (autoWatch && hasFavourite(match) && !hidden.contains(match.id))
+        !hidden.contains(match.id) && (watched.contains(match.id) || (autoWatch && hasFavourite(match)))
     }
 
+    // By team ID, so "England" never catches "England Women" and renames don't matter.
     func hasFavourite(_ match: Match) -> Bool {
-        match.sides.contains { isFavourite(id: $0.id, name: $0.name) }
-    }
-
-    // By ID. Name only as a fallback when the feed gives no ID; exact (case aside),
-    // so "England" never catches "England Women".
-    func isFavourite(id: String, name: String) -> Bool {
-        if !id.isEmpty { return favourites[id] != nil }
-        return favourites.values.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+        match.sides.contains { !$0.id.isEmpty && favourites[$0.id] != nil }
     }
 
     func toggleFavourite(_ team: TeamOption) {
@@ -82,9 +77,6 @@ final class ScoreStore: ObservableObject {
             favourites[team.id] = nil
         } else {
             favourites[team.id] = team.name
-            // Starring a team means "show me their games", including ones stopped before.
-            let theirs = matches.filter { m in m.sides.contains { $0.id == team.id } }.map(\.id)
-            hidden.subtract(theirs)
         }
     }
 

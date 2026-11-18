@@ -54,6 +54,19 @@ struct Team: Decodable {
     let displayName: String?
     let abbreviation: String?
     let logo: String?        // flag for national sides, crest for clubs
+
+    private enum CodingKeys: String, CodingKey { case id, displayName, abbreviation, logo }
+
+    // The ID comes as text today. Accept a number too, and never let an odd ID
+    // fail the whole feed.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(String.self, forKey: .id))
+            ?? (try? c.decodeIfPresent(Int.self, forKey: .id)).flatMap { $0.map(String.init) }
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        abbreviation = try c.decodeIfPresent(String.self, forKey: .abbreviation)
+        logo = try c.decodeIfPresent(String.self, forKey: .logo)
+    }
 }
 
 // MARK: - What the UI shows
