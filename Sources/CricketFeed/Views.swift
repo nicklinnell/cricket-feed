@@ -2,10 +2,12 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
+    enum Mode { case scores, matches, teams }
+
     @ObservedObject var store: ScoreStore
     @ObservedObject var room: PanelRoom
     var onSizeChange: (CGSize) -> Void = { _ in }
-    @State private var picking = false
+    @State private var mode = Mode.scores
     @State private var refreshing = false
     @State private var spin = 0.0
     @State private var listHeight: CGFloat = 0
@@ -14,13 +16,13 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if picking {
-                MatchPicker(store: store, maxHeight: room.maxListHeight - 36)
-            } else {
-                watchedList
+            switch mode {
+            case .matches: MatchPicker(store: store, maxHeight: room.maxListHeight - 36)
+            case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 60)
+            case .scores: watchedList
             }
             // "Updated 11:28" means nothing with no matches picked.
-            if !store.watched.isEmpty || picking || store.error != nil { footer }
+            if store.followingAnything || mode == .matches || store.error != nil { footer }
         }
         .padding(12)
         .frame(width: Theme.panelWidth)
@@ -35,11 +37,11 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 4) {
-            Text(picking ? "Pick matches" : "Cricket")
+            Text(title)
                 .font(.system(size: Theme.titleSize, weight: .semibold, design: .rounded))
             Spacer()
-            if picking {
-                Button("Done") { picking = false }
+            if mode != .scores {
+                Button("Done") { mode = .scores }
                     .buttonStyle(PillButtonStyle())
                     .keyboardShortcut(.defaultAction)
             } else {
@@ -54,7 +56,13 @@ struct ContentView: View {
                 .accessibilityLabel("Refresh now")
                 .disabled(refreshing)
                 Button {
-                    picking = true
+                    mode = .teams
+                } label: { Image(systemName: "star") }
+                .buttonStyle(IconButtonStyle())
+                .help("Favourite teams")
+                .accessibilityLabel("Favourite teams")
+                Button {
+                    mode = .matches
                 } label: { Image(systemName: "plus") }
                 .buttonStyle(IconButtonStyle())
                 .help("Pick matches")
@@ -62,6 +70,14 @@ struct ContentView: View {
             }
         }
         .frame(height: 24)
+    }
+
+    private var title: String {
+        switch mode {
+        case .scores: "Cricket"
+        case .matches: "Pick matches"
+        case .teams: "Favourite teams"
+        }
     }
 
     private func refreshNow() async {
@@ -74,16 +90,16 @@ struct ContentView: View {
     @ViewBuilder
     private var watchedList: some View {
         let items = store.watchedMatches
-        if store.watched.isEmpty {
+        if !store.followingAnything {
             EmptyStateView(
                 symbol: "figure.cricket",
                 title: "No matches yet",
-                message: "Pick the games you want to follow and their scores will show here.",
-                action: ("Pick matches", { picking = true })
+                message: "Pick the games you want to follow, or star your favourite teams, and their scores will show here.",
+                action: ("Pick matches", { mode = .matches })
             )
         } else if store.lastUpdated == nil && store.error == nil {
             VStack(spacing: 10) {
-                ForEach(0..<min(store.watched.count, 2), id: \.self) { _ in SkeletonCard() }
+                ForEach(0..<min(max(store.watched.count, 1), 2), id: \.self) { _ in SkeletonCard() }
             }
             .frame(maxHeight: room.maxListHeight, alignment: .top)
             .clipped()
@@ -93,8 +109,10 @@ struct ContentView: View {
                 title: store.lastUpdated == nil ? "Can't reach the score feed" : "Nothing on right now",
                 message: store.lastUpdated == nil
                     ? "Will keep trying every few seconds."
-                    : "Your picked matches aren't in the feed at the moment.",
-                action: store.lastUpdated == nil ? nil : ("Pick matches", { picking = true }),
+                    : store.favourites.isEmpty
+                        ? "Your picked matches aren't in the feed at the moment."
+                        : "None of your teams are playing right now.",
+                action: store.lastUpdated == nil ? nil : ("Pick matches", { mode = .matches }),
                 tint: store.lastUpdated == nil ? Theme.meta : .accentColor
             )
         } else {
@@ -329,7 +347,7 @@ struct MatchPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            searchField
+            SearchField(prompt: "Search teams or series", text: $search, focused: $searchFocused)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
                     if sections.isEmpty {
@@ -352,16 +370,9 @@ struct MatchPicker: View {
                         }
                     }
                     ForEach(sections, id: \.title) { section in
-                        Text(section.title)
-                            .font(.system(size: 10, weight: .bold))
-                            .textCase(.uppercase)
-                            .kerning(0.6)
-                            .foregroundStyle(Theme.meta)
-                            .padding(.horizontal, 8)
-                            .padding(.top, section.title == sections.first?.title ? 2 : 10)
-                            .padding(.bottom, 3)
+                        SectionLabel(title: section.title, first: section.title == sections.first?.title)
                         ForEach(section.matches) { match in
-                            PickerRow(match: match, selected: store.watched.contains(match.id)) {
+                            PickerRow(match: match, selected: store.isWatched(match)) {
                                 store.toggle(match)
                             }
                         }
@@ -374,29 +385,6 @@ struct MatchPicker: View {
             .bottomFade(true)
         }
         .onAppear { searchFocused = true }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.meta)
-            TextField("Search teams or series", text: $search)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .focused($searchFocused)
-            if !search.isEmpty {
-                Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.meta)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.cardStroke, lineWidth: 0.5))
     }
 }
 

@@ -1,0 +1,180 @@
+import SwiftUI
+
+// A team you can star. `name` must match the feed's displayName exactly (case aside).
+struct TeamOption: Hashable {
+    let name: String
+    var logo: URL? = nil
+}
+
+// Names and IDs checked against ESPN's team records (core.espnuk.org/v2/sports/cricket/teams/<id>).
+// Logos live at a.espncdn.com/i/teamlogos/cricket/500/<id>.png.
+enum TeamCatalogue {
+    static let international: [TeamOption] = teams([
+        (1, "England"), (2, "Australia"), (6, "India"), (3, "South Africa"), (5, "New Zealand"),
+        (7, "Pakistan"), (8, "Sri Lanka"), (4, "West Indies"), (25, "Bangladesh"), (40, "Afghanistan"),
+        (9, "Zimbabwe"), (29, "Ireland"), (30, "Scotland"), (15, "Netherlands"), (33, "Nepal"),
+        (37, "Oman"), (27, "United Arab Emirates"), (11, "United States of America"), (28, "Namibia"),
+        (17, "Canada"), (20, "Papua New Guinea"), (19, "Hong Kong"),
+    ])
+
+    static let counties: [TeamOption] = teams([
+        (904, "Derbyshire"), (924, "Durham"), (984, "Essex"), (1029, "Glamorgan"), (1034, "Gloucestershire"),
+        (1051, "Hampshire"), (1098, "Kent"), (1116, "Lancashire"), (1133, "Leicestershire"), (1190, "Middlesex"),
+        (1221, "Northamptonshire"), (1231, "Nottinghamshire"), (1333, "Somerset"), (1358, "Surrey"),
+        (1371, "Sussex"), (1428, "Warwickshire"), (1458, "Worcestershire"), (1464, "Yorkshire"),
+    ])
+
+    private static func teams(_ list: [(Int, String)]) -> [TeamOption] {
+        list.map { TeamOption(name: $0.1, logo: URL(string: "https://a.espncdn.com/i/teamlogos/cricket/500/\($0.0).png")) }
+    }
+}
+
+struct TeamPicker: View {
+    @ObservedObject var store: ScoreStore
+    var maxHeight: CGFloat = 320
+    @State private var search = ""
+    @FocusState private var searchFocused: Bool
+
+    // Your teams first, then the fixed lists, then anyone else in the feed.
+    private var sections: [(title: String, teams: [TeamOption])] {
+        let known = TeamCatalogue.international + TeamCatalogue.counties
+        var seen = Set<String>()
+        func fresh(_ list: [TeamOption]) -> [TeamOption] {
+            list.filter { seen.insert($0.name.lowercased()).inserted }
+        }
+        // Logos for favourites that came from the feed, so they keep a flag.
+        let feedTeams = store.matches.flatMap(\.sides).map { TeamOption(name: $0.name, logo: $0.logo) }
+        let pool = known + feedTeams
+        let mine = store.favourites.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { name in
+            pool.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } ?? TeamOption(name: name)
+        }
+        let other = feedTeams
+            .filter { $0.name != "?" && !$0.name.isEmpty }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // "Your teams" repeats rows from below on purpose: starring a team never moves it.
+        let all: [(String, [TeamOption])] = [
+            ("Your teams", mine),
+            ("International", fresh(TeamCatalogue.international)),
+            ("English counties", fresh(TeamCatalogue.counties)),
+            ("In the feed", fresh(other)),
+        ]
+        return all.compactMap { title, teams in
+            let shown = search.isEmpty ? teams : teams.filter { $0.name.localizedCaseInsensitiveContains(search) }
+            return shown.isEmpty ? nil : (title, shown)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SearchField(prompt: "Search teams", text: $search, focused: $searchFocused)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    if sections.isEmpty {
+                        EmptyStateView(
+                            symbol: "magnifyingglass",
+                            title: "No results",
+                            message: "Nothing matches \u{201C}\(search)\u{201D}.",
+                            tint: Theme.meta
+                        )
+                    }
+                    ForEach(sections, id: \.title) { section in
+                        SectionLabel(title: section.title, first: section.title == sections.first?.title)
+                        ForEach(section.teams, id: \.name) { team in
+                            TeamRow(team: team, selected: store.isFavourite(team.name)) {
+                                store.toggleFavourite(team.name)
+                            }
+                        }
+                    }
+                }
+                .padding(.bottom, 18) // last row can scroll clear of the fade
+            }
+            .frame(height: min(320, maxHeight))
+            .bottomFade(true)
+            Text("Their matches show up on their own. No need to pick them.")
+                .font(.system(size: Theme.metaSize))
+                .foregroundStyle(Theme.meta)
+                .padding(.horizontal, 4)
+        }
+        .onAppear { searchFocused = true }
+    }
+}
+
+struct TeamRow: View {
+    let team: TeamOption
+    let selected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 9) {
+                Group {
+                    if let logo = team.logo { TeamFlag(url: logo) } else { Color.clear }
+                }
+                .frame(width: 20, height: 14)
+                Text(team.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "star.fill" : "star")
+                    .font(.system(size: 14))
+                    .foregroundStyle(selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Theme.meta))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(PickerRowStyle(selected: selected))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(team.name)
+        .accessibilityHint(selected ? "Remove from favourite teams" : "Add to favourite teams")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// Small capitals heading above a group of rows ("LIVE", "YOUR TEAMS").
+struct SectionLabel: View {
+    let title: String
+    var first = false
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .bold))
+            .textCase(.uppercase)
+            .kerning(0.6)
+            .foregroundStyle(Theme.meta)
+            .padding(.horizontal, 8)
+            .padding(.top, first ? 2 : 10)
+            .padding(.bottom, 3)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.meta)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .focused(focused)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.meta)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.cardStroke, lineWidth: 0.5))
+    }
+}

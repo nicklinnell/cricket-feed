@@ -16,8 +16,20 @@ final class ScoreStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
     }
 
+    // Team names, as the feed spells them. Their matches show without being picked.
+    @Published var favourites: Set<String> {
+        didSet { UserDefaults.standard.set(Array(favourites), forKey: Self.favouritesKey) }
+    }
+
+    // Favourite-team matches the user chose to stop watching.
+    @Published var hidden: Set<String> {
+        didSet { UserDefaults.standard.set(Array(hidden), forKey: Self.hiddenKey) }
+    }
+
     static let watchedKey = "watchedMatchIDs"
     static let statsOpenKey = "statsOpenMatchIDs"
+    static let favouritesKey = "favouriteTeams"
+    static let hiddenKey = "hiddenMatchIDs"
     let refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
@@ -25,14 +37,48 @@ final class ScoreStore: ObservableObject {
     init() {
         watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
         statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
+        favourites = Set(UserDefaults.standard.stringArray(forKey: Self.favouritesKey) ?? [])
+        hidden = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? [])
     }
 
+    // Anything that could put a card on screen: picked matches or favourite teams.
+    var followingAnything: Bool { !watched.isEmpty || !favourites.isEmpty }
+
     var watchedMatches: [Match] {
-        matches.filter { watched.contains($0.id) }
+        matches.filter(isWatched)
+    }
+
+    // Picked by hand, or one side is a favourite team. Either way, not if the user hid it.
+    func isWatched(_ match: Match) -> Bool {
+        !hidden.contains(match.id) && (watched.contains(match.id) || hasFavourite(match))
+    }
+
+    func hasFavourite(_ match: Match) -> Bool {
+        match.sides.contains { isFavourite($0.name) }
+    }
+
+    // Case-insensitive, but otherwise exact: "England" doesn't catch "England Women".
+    func isFavourite(_ team: String) -> Bool {
+        favourites.contains { $0.caseInsensitiveCompare(team) == .orderedSame }
+    }
+
+    func toggleFavourite(_ team: String) {
+        if isFavourite(team) {
+            favourites = favourites.filter { $0.caseInsensitiveCompare(team) != .orderedSame }
+        } else {
+            favourites.insert(team)
+        }
     }
 
     func toggle(_ match: Match) {
-        if watched.contains(match.id) { watched.remove(match.id) } else { watched.insert(match.id) }
+        if isWatched(match) {
+            watched.remove(match.id)
+            // A favourite's match would come straight back, so remember it's unwanted.
+            if hasFavourite(match) { hidden.insert(match.id) }
+        } else {
+            hidden.remove(match.id)
+            if !hasFavourite(match) { watched.insert(match.id) }
+        }
     }
 
     func toggleStats(_ match: Match) {
