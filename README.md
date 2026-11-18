@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="assets/icon-1024.png" width="96" height="96" alt="">
 
 # cricinfo-feed
 
@@ -11,7 +11,15 @@ Small macOS app. Floating window, always on top, shows live scores for the crick
 open build/CricketFeed.app
 ```
 
-Copy `build/CricketFeed.app` into `/Applications` if you want to keep it.
+## Install
+
+```sh
+./scripts/install.sh
+```
+
+Builds the app and copies it into `/Applications`. Run it again to update. If the app is running, quit it from the menu bar icon first, then reopen it.
+
+The icon is `assets/icon-1024.png`. The build turns it into `AppIcon.icns`.
 
 ## Use
 
