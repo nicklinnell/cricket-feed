@@ -11,13 +11,20 @@ final class ScoreStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(watched), forKey: Self.watchedKey) }
     }
 
+    // Cards with the batters & bowlers table open. Remembered across launches.
+    @Published var statsOpen: Set<String> {
+        didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
+    }
+
     static let watchedKey = "watchedMatchIDs"
+    static let statsOpenKey = "statsOpenMatchIDs"
     let refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
 
     init() {
         watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
+        statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
     }
 
     var watchedMatches: [Match] {
@@ -26,6 +33,10 @@ final class ScoreStore: ObservableObject {
 
     func toggle(_ match: Match) {
         if watched.contains(match.id) { watched.remove(match.id) } else { watched.insert(match.id) }
+    }
+
+    func toggleStats(_ match: Match) {
+        if statsOpen.contains(match.id) { statsOpen.remove(match.id) } else { statsOpen.insert(match.id) }
     }
 
     func start() {
@@ -61,8 +72,18 @@ final class ScoreStore: ObservableObject {
             for await r in group { out.append(r) }
             return out
         }
-        var next = details.filter { id, _ in live.contains { $0.id == id } }
-        for (id, d) in results where d != nil { next[id] = d }
+        // Keep the old detail on a failed fetch, but not once a new innings has started.
+        var next = details.filter { id, d in live.contains { $0.id == id && $0.period == d.period } }
+        for (id, d) in results {
+            guard var d else { continue }
+            // Batters stay in the rows they had last time, so they don't swap places.
+            if let old = next[id]?.batters.map(\.id) {
+                // New batters go after the one who stayed; ties keep the fetched order.
+                let rank = { (i: Int, b: BatterLine) in (old.firstIndex(of: b.id) ?? old.count, i) }
+                d.batters = d.batters.enumerated().sorted { rank($0.0, $0.1) < rank($1.0, $1.1) }.map(\.element)
+            }
+            next[id] = d
+        }
         details = next
     }
 }

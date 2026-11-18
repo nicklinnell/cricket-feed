@@ -102,7 +102,9 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(items) { match in
-                        MatchCard(match: match, detail: store.details[match.id])
+                        MatchCard(match: match, detail: store.details[match.id],
+                                  statsOpen: store.statsOpen.contains(match.id),
+                                  toggleStats: { store.toggleStats(match) })
                             .contextMenu {
                                 Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
                                 Button("Stop watching") { store.toggle(match) }
@@ -152,6 +154,8 @@ struct ContentView: View {
 struct MatchCard: View {
     let match: Match
     var detail: LiveDetail?
+    var statsOpen = false
+    var toggleStats: () -> Void = {}
 
     private var phase: MatchPhase { MatchPhase(match) }
 
@@ -183,6 +187,10 @@ struct MatchCard: View {
                     }
                     if let overs = liveDetail?.overs, !overs.isEmpty {
                         OversLine(overs: overs)
+                            .padding(.top, 2)
+                    }
+                    if let live = liveDetail, !live.batters.isEmpty || !live.bowlers.isEmpty {
+                        PlayersSection(detail: live, open: statsOpen, toggle: toggleStats)
                             .padding(.top, 2)
                     }
                 }
@@ -236,8 +244,9 @@ struct MatchCard: View {
     }
 
     // Ball-by-ball extras only while the match is in play (live or a break).
+    // Hidden as soon as a new innings starts, so last innings' players never sit under the new score.
     private var liveDetail: LiveDetail? {
-        match.isLive ? detail : nil
+        match.isLive && detail?.period == match.period ? detail : nil
     }
 
     // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
@@ -447,6 +456,142 @@ struct PickerRowStyle: ButtonStyle {
 struct Hairline: View {
     var body: some View {
         Rectangle().fill(Theme.hairline).frame(height: 0.5)
+    }
+}
+
+// Tap to show or hide the current batters and bowlers with their figures.
+struct PlayersSection: View {
+    let detail: LiveDetail
+    let open: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: toggle) {
+                HStack(spacing: 4) {
+                    Text("Batters & bowlers")
+                        .font(.system(size: 11, weight: .semibold))
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }
+                .foregroundStyle(Theme.meta)
+                .padding(.horizontal, 6)
+                .frame(height: 26)
+            }
+            .buttonStyle(PlainHoverStyle())
+            // Faint resting fill so it reads as a button, not a caption. Sits under the hover fill.
+            .background(open ? Color.clear : Theme.band.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, -6)
+            .accessibilityLabel(open ? "Hide batters and bowlers" : "Show batters and bowlers")
+            .help(open ? "Hide batters and bowlers" : "Show batters and bowlers")
+            if open {
+                PlayersTable(batters: detail.batters, bowlers: detail.bowlers)
+                    .padding(.horizontal, -6) // text lines up with the card's other text
+            }
+        }
+    }
+}
+
+struct PlainHoverStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverPlate(pressed: configuration.isPressed, radius: 6) { configuration.label }
+    }
+}
+
+// BATTING        R    B   4s  6s     SR
+// Mahfijul Islam*  30   80    4   1   37.5
+// BOWLING        O    M    R   W   ECON
+// Kagiso Rabada    7    5   10   1   1.42
+struct PlayersTable: View {
+    let batters: [BatterLine]
+    let bowlers: [BowlerLine]
+
+    // Fixed number columns so both halves line up. Numbers are right-aligned, so the
+    // gap before a column is its width minus its text: 3-digit balls and bowler runs
+    // ("102 111", "3 112") need 30 and 27 to stay apart.
+    private static let widths: [CGFloat] = [28, 30, 27, 20, 46]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !batters.isEmpty {
+                header("Batting", ["R", "B", "4s", "6s", "SR"])
+                ForEach(batters, id: \.id) { b in
+                    row(name: b.name, short: b.shortName, mark: b.onStrike, cells: [
+                        ("\(b.runs)", true), ("\(b.balls)", false), ("\(b.fours)", false), ("\(b.sixes)", false), (b.strikeRate, false),
+                    ])
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes" + (b.balls > 0 ? ", strike rate \(b.strikeRate)" : ""))
+                }
+            }
+            if !bowlers.isEmpty {
+                header("Bowling", ["O", "M", "R", "W", "ECON"])
+                    .padding(.top, batters.isEmpty ? 0 : 6)
+                ForEach(bowlers, id: \.id) { b in
+                    row(name: b.name, short: b.shortName, mark: false, cells: [
+                        (b.overs, false), ("\(b.maidens)", false), ("\(b.conceded)", false), ("\(b.wickets)", true), (b.economy, false),
+                    ])
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets" + (b.balls > 0 ? ", economy \(b.economy)" : ""))
+                }
+            }
+        }
+        .monospacedDigit()
+    }
+
+    private func header(_ title: String, _ cols: [String]) -> some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .textCase(.uppercase)
+                .kerning(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(Array(cols.enumerated()), id: \.offset) { i, c in
+                Text(c).frame(width: Self.widths[i], alignment: .trailing)
+            }
+        }
+        .font(.system(size: 10, weight: .bold))
+        .foregroundStyle(Theme.meta)
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        .frame(height: 20)
+        .background(Theme.band, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    private func row(name: String, short: String, mark: Bool, cells: [(String, Bool)]) -> some View {
+        HStack(spacing: 0) {
+            // Full name if it fits, else "M Islam", else the feed's short name ("Shanto").
+            HStack(spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    Text(name)
+                    Text(initialled(name))
+                    // Feed short name only when it really is shorter ("Shanto"); it's often empty or the full name.
+                    Text(!short.isEmpty && short.count < initialled(name).count ? short : initialled(name)).truncationMode(.tail)
+                }
+                .lineLimit(1)
+                // Always there, so a name doesn't jump between full and short as strike changes.
+                Text("*").opacity(mark ? 1 : 0).accessibilityHidden(true)
+            }
+            .font(.system(size: Theme.bodySize))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(name)
+            ForEach(Array(cells.enumerated()), id: \.offset) { i, cell in
+                Text(cell.0)
+                    .font(.system(size: Theme.bodySize, weight: cell.1 ? .semibold : .regular))
+                    .foregroundStyle(cell.1 ? Color.primary : Theme.meta)
+                    .lineLimit(1)
+                    .frame(width: Self.widths[i], alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 22)
+    }
+
+    private func initialled(_ name: String) -> String {
+        let parts = name.split(separator: " ")
+        guard parts.count > 1, let first = parts.first?.first else { return name }
+        return "\(first) " + parts.dropFirst().joined(separator: " ")
     }
 }
 
