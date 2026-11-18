@@ -72,8 +72,18 @@ final class ScoreStore: ObservableObject {
             for await r in group { out.append(r) }
             return out
         }
-        var next = details.filter { id, _ in live.contains { $0.id == id } }
-        for (id, d) in results where d != nil { next[id] = d }
+        // Keep the old detail on a failed fetch, but not once a new innings has started.
+        var next = details.filter { id, d in live.contains { $0.id == id && $0.period == d.period } }
+        for (id, d) in results {
+            guard var d else { continue }
+            // Batters stay in the rows they had last time, so they don't swap places.
+            if let old = next[id]?.batters.map(\.id) {
+                // New batters go after the one who stayed; ties keep the fetched order.
+                let rank = { (i: Int, b: BatterLine) in (old.firstIndex(of: b.id) ?? old.count, i) }
+                d.batters = d.batters.enumerated().sorted { rank($0.0, $0.1) < rank($1.0, $1.1) }.map(\.element)
+            }
+            next[id] = d
+        }
         details = next
     }
 }

@@ -469,15 +469,17 @@ struct PlayersSection: View {
             Button(action: toggle) {
                 HStack(spacing: 4) {
                     Text("Batters & bowlers")
-                        .font(.system(size: Theme.metaSize, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .rotationEffect(.degrees(open ? 180 : 0))
                 }
                 .foregroundStyle(Theme.meta)
                 .padding(.horizontal, 6)
-                .frame(height: 22)
+                .frame(height: 26)
+                // Faint resting fill so it reads as a button, not a caption.
+                .background(open ? Color.clear : Theme.band.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             .buttonStyle(PlainHoverStyle())
             .padding(.horizontal, -6)
@@ -485,6 +487,7 @@ struct PlayersSection: View {
             .help(open ? "Hide batters and bowlers" : "Show batters and bowlers")
             if open {
                 PlayersTable(batters: detail.batters, bowlers: detail.bowlers)
+                    .padding(.horizontal, -6) // text lines up with the card's other text
             }
         }
     }
@@ -505,29 +508,29 @@ struct PlayersTable: View {
     let bowlers: [BowlerLine]
 
     // Fixed number columns so both halves line up.
-    private static let widths: [CGFloat] = [30, 28, 24, 22, 44]
+    private static let widths: [CGFloat] = [26, 26, 22, 22, 50]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !batters.isEmpty {
                 header("Batting", ["R", "B", "4s", "6s", "SR"])
                 ForEach(batters, id: \.id) { b in
-                    row(name: b.name, mark: b.onStrike, cells: [
+                    row(name: b.name, short: b.shortName, mark: b.onStrike, cells: [
                         ("\(b.runs)", true), ("\(b.balls)", false), ("\(b.fours)", false), ("\(b.sixes)", false), (b.strikeRate, false),
                     ])
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes")
+                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes, strike rate \(b.strikeRate)")
                 }
             }
             if !bowlers.isEmpty {
                 header("Bowling", ["O", "M", "R", "W", "ECON"])
                     .padding(.top, batters.isEmpty ? 0 : 6)
                 ForEach(bowlers, id: \.id) { b in
-                    row(name: b.name, mark: false, cells: [
+                    row(name: b.name, short: b.shortName, mark: false, cells: [
                         (b.overs, false), ("\(b.maidens)", false), ("\(b.conceded)", false), ("\(b.wickets)", true), (b.economy, false),
                     ])
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name), \(b.overs) overs, \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets")
+                    .accessibilityLabel("\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets, economy \(b.economy)")
                 }
             }
         }
@@ -544,24 +547,29 @@ struct PlayersTable: View {
                 Text(c).frame(width: Self.widths[i], alignment: .trailing)
             }
         }
-        .font(.system(size: 9.5, weight: .bold))
+        .font(.system(size: 10, weight: .bold))
         .foregroundStyle(Theme.meta)
         .lineLimit(1)
         .padding(.horizontal, 6)
         .frame(height: 20)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .background(Theme.band, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
         .accessibilityHidden(true)
     }
 
-    private func row(name: String, mark: Bool, cells: [(String, Bool)]) -> some View {
+    private func row(name: String, short: String, mark: Bool, cells: [(String, Bool)]) -> some View {
         HStack(spacing: 0) {
-            // Full name if it fits, else "M Islam".
-            ViewThatFits(in: .horizontal) {
-                Text(name + (mark ? "*" : ""))
-                Text(shortName(name) + (mark ? "*" : ""))
+            // Full name if it fits, else "M Islam", else the feed's short name ("Shanto").
+            HStack(spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    Text(name)
+                    Text(initialled(name))
+                    Text(short.isEmpty ? initialled(name) : short).truncationMode(.tail)
+                }
+                .lineLimit(1)
+                // Always there, so a name doesn't jump between full and short as strike changes.
+                Text("*").opacity(mark ? 1 : 0).accessibilityHidden(true)
             }
-            .font(.system(size: Theme.bodySize, weight: .medium))
-            .lineLimit(1)
+            .font(.system(size: Theme.bodySize))
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(name)
             ForEach(Array(cells.enumerated()), id: \.offset) { i, cell in
@@ -576,7 +584,7 @@ struct PlayersTable: View {
         .frame(height: 22)
     }
 
-    private func shortName(_ name: String) -> String {
+    private func initialled(_ name: String) -> String {
         let parts = name.split(separator: " ")
         guard parts.count > 1, let first = parts.first?.first else { return name }
         return "\(first) " + parts.dropFirst().joined(separator: " ")

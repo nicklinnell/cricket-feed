@@ -38,6 +38,9 @@ enum Theme {
     static let cardStroke = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.08), light: NSColor(white: 0, alpha: 0.08)))
     static let hairline = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.09), light: NSColor(white: 0, alpha: 0.08)))
 
+    // Header band behind BATTING / BOWLING. Light needs a touch more to show on near-white cards.
+    static let band = Color(nsColor: dynamic(dark: NSColor(white: 1, alpha: 0.06), light: NSColor(white: 0, alpha: 0.07)))
+
     private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
     }
