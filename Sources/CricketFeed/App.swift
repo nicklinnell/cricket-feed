@@ -29,11 +29,12 @@ final class FloatingPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = ScoreStore()
+    let room = PanelRoom()
     var panel: FloatingPanel!
     var statusItem: NSStatusItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let hosting = NSHostingView(rootView: ContentView(store: store) { [weak self] size in
+        let hosting = NSHostingView(rootView: ContentView(store: store, room: room) { [weak self] size in
             self?.fitPanel(to: size)
         })
         hosting.sizingOptions = []
@@ -43,6 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.setFrameTopLeftPoint(NSPoint(x: f.maxX - 320, y: f.maxY - 20))
         }
         panel.orderFrontRegardless()
+        updateRoom()
+
+        // Keep the list's height cap in step with where the panel is.
+        let nc = NotificationCenter.default
+        for name in [NSWindow.didMoveNotification, NSWindow.didChangeScreenNotification] {
+            nc.addObserver(forName: name, object: panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateRoom() }
+            }
+        }
+        nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateRoom() }
+        }
 
         // Menu bar icon to show/hide and quit (the app has no Dock icon).
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -67,6 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.setFrame(new, display: true)
             panel.invalidateShadow()
         }
+    }
+
+    // Space from the panel's top edge down to the bottom of its screen.
+    func updateRoom() {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let room = panel.frame.maxY - screen.visibleFrame.minY
+        if abs(self.room.height - room) > 1 { self.room.height = room }
     }
 
     @objc func togglePanel() {

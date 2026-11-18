@@ -3,6 +3,7 @@ import AppKit
 
 struct ContentView: View {
     @ObservedObject var store: ScoreStore
+    @ObservedObject var room: PanelRoom
     var onSizeChange: (CGSize) -> Void = { _ in }
     @State private var picking = false
     @State private var refreshing = false
@@ -101,11 +102,19 @@ struct ContentView: View {
                             }
                     }
                 }
+                .padding(.bottom, scrolls ? 6 : 0)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
-            .scrollDisabled(listHeight <= Theme.maxListHeight)
-            .scrollIndicators(.automatic)
-            .frame(height: min(max(listHeight, 1), Theme.maxListHeight))
+            .scrollDisabled(!scrolls)
+            .frame(height: min(max(listHeight, 1), room.maxListHeight))
+            // Soft fade at the bottom so a cut-off card reads as "more below".
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .black.opacity(scrolls ? 0 : 1)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 18)
+                }
+            }
         }
     }
 
@@ -130,6 +139,8 @@ struct ContentView: View {
         .lineLimit(1)
         .padding(.horizontal, 2)
     }
+
+    private var scrolls: Bool { listHeight > room.maxListHeight }
 
     private func short(_ d: Date) -> String {
         d.formatted(date: .omitted, time: .shortened)
@@ -176,7 +187,10 @@ struct MatchCard: View {
         .cardBackground()
     }
 
-    private var inPlay: Bool { MatchPhase(match) == .live }
+    // Emphasise the summary only for live play, and not for stale toss news.
+    private var inPlay: Bool {
+        MatchPhase(match) == .live && !match.summary.localizedCaseInsensitiveContains("won toss")
+    }
 
     // Best guess: in live play, the only side whose score has overs in brackets is batting.
     private var battingSide: Match.Side? {

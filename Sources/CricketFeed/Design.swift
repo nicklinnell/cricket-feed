@@ -11,12 +11,18 @@ enum Theme {
     static let paused = Color(nsColor: NSColor(name: nil) { a in
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? .systemOrange
-            : NSColor(srgbRed: 0.78, green: 0.38, blue: 0.0, alpha: 1)
+            : NSColor(srgbRed: 0.63, green: 0.32, blue: 0.0, alpha: 1)
     })
-    static let maxListHeight: CGFloat = {
-        let h = NSScreen.main?.visibleFrame.height ?? 800
-        return max(240, h - 160)
-    }()
+    // Header, footer, padding and a small margin above the screen edge.
+    static let panelChrome: CGFloat = 96
+}
+
+// How much vertical space the panel has below its top edge. Updated by AppDelegate.
+@MainActor
+final class PanelRoom: ObservableObject {
+    @Published var height: CGFloat = 800
+
+    var maxListHeight: CGFloat { max(160, height - Theme.panelChrome) }
 }
 
 // MARK: - Score splitting
@@ -54,7 +60,7 @@ enum MatchPhase {
     case finished
 
     // Known pauses in play. Any other in-play label counts as live.
-    private static let breaks = ["lunch", "tea", "stumps", "drinks", "innings break", "rain", "delayed", "bad light", "wet outfield", "interrupted"]
+    private static let breaks = ["lunch", "tea", "dinner", "stumps", "drinks", "timeout", "innings break", "rain", "delayed", "bad light", "wet outfield", "interrupted"]
 
     init(_ match: Match) {
         switch match.state {
@@ -78,12 +84,13 @@ struct LiveDot: View {
             .frame(width: 5, height: 5)
             .opacity(dim && !reduceMotion ? 0.35 : 1)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dim)
-            .onAppear { dim = true }
+            .onAppear { dim = !reduceMotion }
     }
 }
 
 struct StatusPill: View {
     let match: Match
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var phase: MatchPhase { MatchPhase(match) }
 
@@ -97,7 +104,7 @@ struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if phase == .live { LiveDot() }
+            if phase == .live { LiveDot().id(reduceMotion) }
             Text(match.stateLabel.isEmpty ? "Unknown" : match.stateLabel)
                 .font(.system(size: 9.5, weight: .bold))
                 .textCase(.uppercase)
@@ -230,7 +237,7 @@ struct SkeletonCard: View {
             HStack { bar(width: 90, height: 11); Spacer(); bar(width: 44, height: 14) }
             HStack { bar(width: 76, height: 11); Spacer(); bar(width: 56, height: 14) }
         }
-        .padding(11)
+        .padding(10)
         .cardBackground()
     }
 
@@ -250,8 +257,9 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 24, weight: .regular))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 28, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
                 .padding(.bottom, 2)
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
