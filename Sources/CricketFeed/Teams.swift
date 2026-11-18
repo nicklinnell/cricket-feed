@@ -64,6 +64,20 @@ struct TeamPicker: View {
         }
     }
 
+    private struct Row {
+        let id: String
+        let title: String
+        var team: TeamOption? = nil
+        var first = false
+    }
+
+    private var rows: [Row] {
+        sections.enumerated().flatMap { i, section in
+            [Row(id: "#" + section.title, title: section.title, first: i == 0)]
+                + section.teams.map { Row(id: section.title + "/" + $0.name.lowercased(), title: section.title, team: $0) }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SearchField(prompt: "Search teams", text: $search, focused: $searchFocused)
@@ -77,12 +91,15 @@ struct TeamPicker: View {
                             tint: Theme.meta
                         )
                     }
-                    ForEach(sections, id: \.title) { section in
-                        SectionLabel(title: section.title, first: section.title == sections.first?.title)
-                        ForEach(section.teams, id: \.name) { team in
+                    // One flat list with section-scoped IDs: a team can sit in two sections
+                    // ("Your teams" and "International"), and a shared ID makes one row vanish.
+                    ForEach(rows, id: \.id) { row in
+                        if let team = row.team {
                             TeamRow(team: team, selected: store.isFavourite(team.name)) {
                                 store.toggleFavourite(team.name)
                             }
+                        } else {
+                            SectionLabel(title: row.title, first: row.first)
                         }
                     }
                 }
