@@ -37,7 +37,8 @@ final class ScoreStore: ObservableObject {
     static let favouritesKey = "favouriteTeamIDs"
     static let autoWatchKey = "autoWatchFavourites"
     static let hiddenKey = "hiddenMatchIDs"
-    let refreshSeconds: UInt64 = 10
+    // Seconds between feed checks. Tests shorten it.
+    var refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
     private let defaults: UserDefaults
