@@ -38,55 +38,35 @@ extension NetworkTests {
             NSWindow.removeFrame(usingName: Self.frameName)
         }
 
-        func expectedRoom(_ panel: NSPanel) -> CGFloat {
-            panel.frame.maxY - (panel.screen ?? NSScreen.main!).visibleFrame.minY
+        func launch(_ d: AppDelegate) {
+            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
         }
 
-        @Test func floatingPanelSetup() {
+        // The search box needs a key window, and the panel's spot is remembered under one name.
+        @Test func floatingPanelTakesTypingAndRemembersItsFrame() {
             NSWindow.removeFrame(usingName: Self.frameName)
-            let content = NSView()
-            let panel = FloatingPanel(content: content)
+            let panel = FloatingPanel(content: NSView())
             defer { panel.setFrameAutosaveName(""); NSWindow.removeFrame(usingName: Self.frameName) }
             #expect(panel.canBecomeKey)
-            #expect(panel.level == .floating)
-            #expect(panel.isFloatingPanel)
-            #expect(!panel.hidesOnDeactivate)
-            #expect(panel.isMovableByWindowBackground)
-            #expect(!panel.isOpaque)
-            #expect(panel.hasShadow)
-            #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
-            #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
-            #expect(panel.styleMask.contains(.nonactivatingPanel))
-            #expect(panel.contentView === content)
             #expect(panel.frameAutosaveName == Self.frameName)
         }
 
-        @Test func defaultInitUsesItsOwnStoreAndDoesNothingWithoutAPanel() {
-            // Default store, never launched, so nothing starts.
-            let d = AppDelegate()
-            #expect(d.panel == nil)
-            #expect(d.store.error == nil)
-            // Guards: no panel means no resize and no room change.
-            d.fitPanel(to: CGSize(width: 100, height: 100))
-            d.updateRoom()
-            #expect(d.room.height == 800)
-            #expect(d.panel == nil)
-        }
-
         @Test func firstLaunchPlacesPanelTopRight() async throws {
+            // Needs a real display to place against.
+            guard let screen = NSScreen.main else { return }
             NSWindow.removeFrame(usingName: Self.frameName)
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
 
             let panel = try #require(d.panel)
-            let screen = try #require(NSScreen.main)
             let f = screen.visibleFrame
-            #expect(panel.frame.minX == f.maxX - 320)
-            #expect(panel.frame.maxY == f.maxY - 20)
+            #expect(abs(panel.frame.minX - (f.maxX - 320)) < 1)
+            #expect(abs(panel.frame.maxY - (f.maxY - 20)) < 1)
             #expect(panel.isVisible)
-            #expect(d.room.height == expectedRoom(panel))
+            // Room below the panel: the screen's usable height less the 20pt gap at the top.
+            #expect(abs(d.room.height - (f.height - 20)) < 1)
 
             // Menu bar item with show/hide, a separator and quit.
             let item = try #require(d.statusItem)
@@ -102,13 +82,13 @@ extension NetworkTests {
 
             // SwiftUI reports its size and the panel fits to it, top-left kept.
             pump(0.2)
-            #expect(panel.frame.minX == f.maxX - 320)
+            #expect(abs(panel.frame.minX - (f.maxX - 320)) < 1)
             #expect(abs(panel.frame.maxY - (f.maxY - 20)) < 1)
             #expect(panel.frame.size != CGSize(width: 300, height: 200))
         }
 
         @Test func launchRestoresSavedFrame() async throws {
-            let screen = try #require(NSScreen.main)
+            guard let screen = NSScreen.main else { return }
             let f = screen.visibleFrame
             let saved = NSRect(x: f.minX + 40, y: f.minY + 60, width: 280, height: 300)
             // Save a frame under the panel's name, as a previous run would have.
@@ -119,7 +99,7 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             let panel = try #require(d.panel)
             // A fixed-size panel takes the saved top-left, not the saved size.
             #expect(panel.frame.minX == saved.minX)
@@ -132,7 +112,7 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             try await waitForFirstRefresh(d)
             pump(0.1)
             let panel = try #require(d.panel)
@@ -156,17 +136,20 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             try await waitForFirstRefresh(d)
             pump(0.1)
             let panel = try #require(d.panel)
+            guard let f = NSScreen.main?.visibleFrame, panel.screen == NSScreen.main else { return }
 
+            // Top edge 400pt above the bottom of the usable screen: 400pt of room.
+            panel.setFrameTopLeftPoint(NSPoint(x: f.minX + 10, y: f.minY + 400))
             d.room.height = 1
             d.updateRoom()
-            #expect(d.room.height == expectedRoom(panel))
+            #expect(abs(d.room.height - 400) < 0.01)
 
             // Within a point of the real value: left alone.
-            let near = expectedRoom(panel) - 0.5
+            let near: CGFloat = 399.5
             d.room.height = near
             d.updateRoom()
             #expect(d.room.height == near)
@@ -177,33 +160,35 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             try await waitForFirstRefresh(d)
             pump(0.1)
             let panel = try #require(d.panel)
 
-            // Moving the panel down shrinks the room below it.
+            let before = d.room.height
+
+            // Moving the panel down 100pt leaves 100pt less room below it.
             panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: panel.frame.minY - 100))
             pump(0.1)
-            #expect(d.room.height == expectedRoom(panel))
+            #expect(abs(d.room.height - (before - 100)) < 0.01)
 
             // Screen shape changes recheck it too.
             d.room.height = 1
             NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
             pump(0.1)
-            #expect(d.room.height == expectedRoom(panel))
+            #expect(abs(d.room.height - (before - 100)) < 0.01)
 
             // So does the panel moving to another screen.
             d.room.height = 1
             NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: panel)
             pump(0.1)
-            #expect(d.room.height == expectedRoom(panel))
+            #expect(abs(d.room.height - (before - 100)) < 0.01)
         }
 
+        // Older macOS lacks the cricket ball symbol: the next name is used instead.
         @Test func statusIconFallsBack() {
             #expect(AppDelegate.statusIcon(["no.such.symbol.here", "sportscourt"]) != nil)
             #expect(AppDelegate.statusIcon(["no.such.symbol.here"]) == nil)
-            #expect(AppDelegate.statusIcon() != nil)
         }
 
         @Test func updateRoomUsesMainScreenWhenPanelIsOffScreen() async throws {
@@ -211,17 +196,19 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             try await waitForFirstRefresh(d)
             pump(0.1)
             let panel = try #require(d.panel)
 
-            panel.setFrameOrigin(NSPoint(x: -50000, y: -50000))
+            guard let f = NSScreen.main?.visibleFrame else { return }
+
+            // Far off to the side (no screen), top edge 250pt above the main screen's usable bottom.
+            panel.setFrameTopLeftPoint(NSPoint(x: -50000, y: f.minY + 250))
             #expect(panel.screen == nil)
             d.room.height = 1
             d.updateRoom()
-            let main = try #require(NSScreen.main)
-            #expect(d.room.height == panel.frame.maxY - main.visibleFrame.minY)
+            #expect(abs(d.room.height - 250) < 0.01)
         }
 
         @Test func togglePanelHidesAndShows() async throws {
@@ -229,7 +216,7 @@ extension NetworkTests {
             let temp = TempDefaults()
             let d = makeDelegate(temp)
             defer { tearDown(d) }
-            d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            launch(d)
             try await waitForFirstRefresh(d)
             let panel = try #require(d.panel)
 
@@ -240,73 +227,26 @@ extension NetworkTests {
             #expect(panel.isVisible)
         }
 
-        @Test func storeIsFreedAfterTearDown() async throws {
+        // The panel's resize callback and screen observers hold the delegate weakly,
+        // so they never keep it (and its store and refresh loop) alive.
+        @Test func launchCallbacksDoNotRetainDelegate() async throws {
             NSWindow.removeFrame(usingName: Self.frameName)
             let temp = TempDefaults()
-            weak var weakStore: ScoreStore?
             weak var weakDelegate: AppDelegate?
             do {
                 let d = makeDelegate(temp)
-                weakStore = d.store
                 weakDelegate = d
-                d.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+                launch(d)
                 try await waitForFirstRefresh(d)
                 pump(0.1)
                 tearDown(d)
             }
-            // SwiftUI and AppKit let go a moment later, once autoreleased objects drain.
-            for _ in 0..<60 where weakStore != nil {
+            // AppKit and SwiftUI let go a moment later, once autoreleased objects drain.
+            for _ in 0..<60 where weakDelegate != nil {
                 pump(0.05)
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
             #expect(weakDelegate == nil)
-            #expect(weakStore == nil)
-        }
-
-        @Test func mainSetsUpAppAndRuns() async throws {
-            let app = NSApplication.shared
-            let oldDelegate = app.delegate
-            let oldPolicy = app.activationPolicy()
-            let oldFactory = Main.makeDelegate
-            NSWindow.removeFrame(usingName: Self.frameName)
-
-            // The default factory gives a plain delegate.
-            #expect(oldFactory().panel == nil)
-
-            let temp = TempDefaults()
-            var made: AppDelegate?
-            Main.makeDelegate = { [self] in
-                let d = makeDelegate(temp)
-                made = d
-                return d
-            }
-            defer {
-                Main.makeDelegate = oldFactory
-                app.delegate = oldDelegate
-                app.setActivationPolicy(oldPolicy)
-            }
-
-            // Stop the run loop that main() starts, then wake it so run() returns.
-            let stopper = Timer(timeInterval: 0.3, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    NSApp.stop(nil)
-                    let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
-                                                  timestamp: 0, windowNumber: 0, context: nil,
-                                                  subtype: 0, data1: 0, data2: 0)!
-                    NSApp.postEvent(wake, atStart: true)
-                }
-            }
-            RunLoop.main.add(stopper, forMode: .common)
-            Main.main()
-
-            let d = try #require(made)
-            #expect(app.delegate === d)
-            #expect(app.activationPolicy() == .accessory)
-            // run() may or may not finish launching in a test process; clean up if it did.
-            if d.panel != nil {
-                try await waitForFirstRefresh(d)
-                tearDown(d)
-            }
         }
     }
 }

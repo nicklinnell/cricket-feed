@@ -112,7 +112,8 @@ final class ScoreStore: ObservableObject {
         }
     }
 
-    // Ends the refresh loop and waits until it has finished.
+    // Ends the refresh loop and waits until it has finished. The app never calls
+    // this (the loop runs until quit); tests use it so no loop outlives its test.
     func stop() async {
         let old = loop
         loop = nil
