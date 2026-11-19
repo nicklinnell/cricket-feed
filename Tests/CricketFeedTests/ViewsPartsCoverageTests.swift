@@ -43,6 +43,7 @@ private func wheel(_ window: NSWindow, at pointInWindow: NSPoint? = nil, lines: 
     let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: lines, wheel2: 0, wheel3: 0)!
     cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: points)
     cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(lines))
+    cg.flags = [] // a nil source picks up keys held on the real keyboard; Shift turns scrolls sideways
     if let p = pointInWindow {
         // CG screen coordinates have y down from the top of the main screen.
         let screen = window.convertPoint(toScreen: p)
@@ -379,10 +380,11 @@ private func bowler(_ name: String, balls: Int) -> BowlerLine {
         wheel(window, at: inWindow)
         #expect(lastWheel() == (0, -3))
 
-        // Engaged: a new ball doesn't jump the line.
+        // A new ball while engaged (no jump), then another after disengaging (jumps to
+        // the current over). The offset can't be moved by hand here, so this only
+        // checks the line stays at the current over.
         model.overs[11] = over(12, [one, four, dot, six, wkt, wide, one])
         pump(0.3)
-        // Disengaged: a new ball jumps to the current over.
         click(v, at: lineCentre)
         model.overs.append(over(13, [one]))
         pump(0.5)
@@ -420,6 +422,7 @@ private func bowler(_ name: String, balls: Int) -> BowlerLine {
         // Mostly sideways already: left alone.
         w.hovering = true
         let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: 0, wheel2: -3, wheel3: 0)!
+        cg.flags = []
         for raw: UInt32 in [51, 91, 92] { cg.setIntegerValueField(CGEventField(rawValue: raw)!, value: Int64(window.windowNumber)) }
         NSApp.sendEvent(NSEvent(cgEvent: cg)!)
         pump(0.05)
