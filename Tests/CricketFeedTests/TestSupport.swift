@@ -77,6 +77,16 @@ final class StubURLProtocol: URLProtocol {
 
 // MARK: - Hosting views
 
+// Every test that hosts a view goes in a suite nested inside this one, so hosted
+// views (and app-wide event monitors such as WheelRedirect's) never overlap:
+//
+//     extension UITests {
+//         @MainActor @Suite struct MyViews { ... }
+//     }
+//
+// A view test that also uses the network stub goes in NetworkTests instead.
+@Suite(.serialized) struct UITests {}
+
 // Puts a SwiftUI view in a window parked off screen, lays it out and lets SwiftUI
 // settle, so `body` and its children actually run. The window is ordered front
 // (off screen) because SwiftUI only takes clicks in a visible window.
