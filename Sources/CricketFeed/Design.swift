@@ -244,8 +244,8 @@ actor FlagCache {
         // Ask ESPN's image server for a small copy rather than the 500px original.
         var comps = URLComponents(string: "https://a.espncdn.com/combiner/i")
         comps?.queryItems = [.init(name: "img", value: url.path), .init(name: "w", value: "80"), .init(name: "h", value: "80")]
-        let small = url.host == "a.espncdn.com" ? (comps?.url ?? url) : url
-        for candidate in [small, url] {
+        let small = url.host == "a.espncdn.com" ? comps?.url : nil
+        for candidate in [small, url].compactMap({ $0 }) {
             if let (data, resp) = try? await URLSession.shared.data(from: candidate),
                (resp as? HTTPURLResponse)?.statusCode == 200,
                let img = NSImage(data: data) {
@@ -262,7 +262,7 @@ actor FlagCache {
 
 // ESPN logos sit inside a square with clear padding. Crop to the visible part
 // so a 3:2 flag fills its slot instead of shrinking to a sliver.
-private func trimTransparentEdges(_ image: NSImage) -> NSImage {
+func trimTransparentEdges(_ image: NSImage) -> NSImage {
     guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
     let w = cg.width, h = cg.height
     var px = [UInt8](repeating: 0, count: w * h * 4)
@@ -317,7 +317,15 @@ struct HoverPlate<Content: View>: View {
     var selected = false
     var radius: CGFloat = 8
     @ViewBuilder var content: Content
-    @State private var hovering = false
+    @State private var hovering: Bool
+
+    init(pressed: Bool = false, selected: Bool = false, radius: CGFloat = 8, @ViewBuilder content: () -> Content) {
+        self.pressed = pressed
+        self.selected = selected
+        self.radius = radius
+        self.content = content()
+        _hovering = State(initialValue: false)
+    }
 
     var body: some View {
         content
