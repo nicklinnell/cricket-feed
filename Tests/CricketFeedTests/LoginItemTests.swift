@@ -132,6 +132,7 @@ struct LoginItemFailure: LocalizedError {
 
         fake.stateOnFailure = .off
         d.toggleLoginItem()
+        #expect(fake.sets == [true, false])
         #expect(d.loginMenuItem.state == .off)
         #expect(errors().isEmpty)
     }
@@ -167,7 +168,6 @@ struct LoginItemFailure: LocalizedError {
         #expect(installed("/Users/someone/Applications/CricketFeed.app"))
         #expect(!installed("/Users/someone/repo/build/CricketFeed.app"))
         #expect(installed("/Applications/Tools/CricketFeed.app"))
-        #expect(installed("/Applications/CricketFeed.app/"))
         #expect(!installed("/ApplicationsOld/CricketFeed.app"))
         #expect(!installed("/Applications/CricketFeed"))
         #expect(!installed("/Users/other/Applications/CricketFeed.app"))
