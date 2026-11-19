@@ -38,5 +38,18 @@ extension NetworkTests {
             StubURLProtocol.on(prefix: "https://site.web.api.espn.com/apis/site/v2/sports/cricket/", json: #"{"commentary":{}}"#)
             #expect(try await fetchLiveDetail(match("42")) == nil)
         }
+
+        // A later page with no items adds nothing but doesn't lose page 1's balls.
+        @Test func laterPageWithNoItemsKeepsEarlierBalls() async throws {
+            StubURLProtocol.reset()
+            let base = "https://site.web.api.espn.com/apis/site/v2/sports/cricket/"
+            StubURLProtocol.on(prefix: base, json: #"{"commentary":{"pageCount":2}}"#)
+            StubURLProtocol.on({ $0.absoluteString.hasPrefix(base) && $0.absoluteString.contains("page=1") }) { _ in
+                (200, Data(#"{"commentary":{"pageCount":2,"items":[\#(ball(over: 1, runs: 4))]}}"#.utf8))
+            }
+            let d = try await fetchLiveDetail(match("42"))
+            #expect(d?.overs.map(\.number) == [1])
+            #expect(d?.overs.first?.runs == 4)
+        }
     }
 }

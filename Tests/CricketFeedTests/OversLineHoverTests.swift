@@ -57,7 +57,7 @@ private func last(_ w: RecordingWindow) -> (x: CGFloat, y: CGFloat)? { w.wheels.
 
 extension UITests {
     @MainActor @Suite struct OversLineWheel {
-        static let overs = (1...12).map { OverSummary(number: $0, balls: [
+        nonisolated static let overs = (1...12).map { OverSummary(number: $0, balls: [
             Ball(label: "1", kind: .runs, runs: 1), Ball(label: "4", kind: .four, runs: 4),
             Ball(label: "•", kind: .dot, runs: 0), Ball(label: "6", kind: .six, runs: 6),
             Ball(label: "W", kind: .wicket, runs: 0), Ball(label: "1wd", kind: .extra, runs: 1),
