@@ -148,7 +148,10 @@ final class SystemNotifier: NSObject, MilestoneNotifier, UNUserNotificationCente
 
     // Shows the prompt the first time; after that it answers straight away.
     func requestPermission() {
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error { NSLog("CricketFeed: notification permission failed: \(error.localizedDescription)") }
+            else if !granted { NSLog("CricketFeed: notifications not allowed") }
+        }
     }
 
     // Adds the notification only once permission is answered, so the first
@@ -160,8 +163,14 @@ final class SystemNotifier: NSObject, MilestoneNotifier, UNUserNotificationCente
         content.sound = .default
         let request = UNNotificationRequest(identifier: "milestone-\(alert.matchID)-\(UUID().uuidString)", content: content, trigger: nil)
         let center = center
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            if granted { center.add(request) }
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            guard granted else {
+                NSLog("CricketFeed: milestone alert not sent, permission \(error?.localizedDescription ?? "denied")")
+                return
+            }
+            center.add(request) { error in
+                if let error { NSLog("CricketFeed: milestone alert failed: \(error.localizedDescription)") }
+            }
         }
     }
 
