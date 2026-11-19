@@ -342,6 +342,11 @@ struct MatchPicker: View {
     @State private var search = ""
     @FocusState private var searchFocused: Bool
 
+    init(store: ScoreStore, maxHeight: CGFloat = 320) {
+        self.store = store
+        self.maxHeight = maxHeight
+    }
+
     private var filtered: [Match] {
         let all = store.matches.sorted { a, b in
             // Live first, then upcoming, then finished.
@@ -598,7 +603,7 @@ struct PlayersTable: View {
         .frame(height: 22)
     }
 
-    private func initialled(_ name: String) -> String {
+    func initialled(_ name: String) -> String {
         let parts = name.split(separator: " ")
         guard parts.count > 1, let first = parts.first?.first else { return name }
         return "\(first) " + parts.dropFirst().joined(separator: " ")
@@ -647,6 +652,10 @@ struct OversLine: View {
     let overs: [OverSummary]
     @State private var engaged = false
     @State private var wheel = WheelRedirect()
+
+    init(overs: [OverSummary]) {
+        self.overs = overs
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -734,7 +743,8 @@ final class WheelRedirect {
                     cg.setIntegerValueField(vertical, value: 0)
                 }
             }
-            return NSEvent(cgEvent: cg) ?? event
+            guard let redirected = NSEvent(cgEvent: cg) else { return event }
+            return redirected
         }
     }
 
@@ -781,7 +791,7 @@ struct OverGroup: View {
         .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
     }
 
-    private func ordinal(_ n: Int) -> String {
+    func ordinal(_ n: Int) -> String {
         let tens = n % 100
         let suffix = (11...13).contains(tens) ? "th" : [1: "st", 2: "nd", 3: "rd"][n % 10] ?? "th"
         return "\(n)\(suffix)"
@@ -809,7 +819,7 @@ struct BallChip: View {
             }
     }
 
-    private var bg: Color {
+    var bg: Color {
         switch ball.kind {
         case .four: Theme.four
         case .six: Theme.six
@@ -819,7 +829,7 @@ struct BallChip: View {
         }
     }
 
-    private var fg: Color {
+    var fg: Color {
         switch ball.kind {
         case .four, .six, .wicket: .white
         case .extra: Theme.pausedInk
