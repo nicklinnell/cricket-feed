@@ -113,6 +113,9 @@ struct LiveDetail: Hashable {
     var bowlers: [BowlerLine] = []
     var period = 0            // innings these figures belong to
     var battingTeam: String?  // for "Root (England) reaches 100"
+    // Every batter in the fetched balls with their best total, out ones too,
+    // so a 50 just before a wicket still counts. Milestone alerts only.
+    var inningsBatters: [BatterLine] = []
 
     var rates: [(label: String, value: String)] {
         var out: [(label: String, value: String)] = []
@@ -220,6 +223,23 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     return (batters, bowlers)
 }
 
+// Each batter named in the items, first-seen order, with their highest total.
+func inningsBatters(_ items: [PBPItem]) -> [BatterLine] {
+    var out: [BatterLine] = []
+    for item in items {
+        for b in [item.batsman, item.otherBatsman] {
+            guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { continue }
+            let line = BatterLine(id: id, name: name, runs: b?.totalRuns ?? 0, balls: b?.faced ?? 0, fours: 0, sixes: 0)
+            if let i = out.firstIndex(where: { $0.id == id }) {
+                if line.runs >= out[i].runs { out[i] = line }
+            } else {
+                out.append(line)
+            }
+        }
+    }
+    return out
+}
+
 // Runs off one ball. scoreValue drops byes and leg byes run off a no-ball
 // (it says 1 for a no-ball plus 2 leg byes); the innings block has the full 3.
 func ballRuns(_ item: PBPItem) -> Int {
@@ -297,6 +317,7 @@ func buildLiveDetail(_ items: [PBPItem], period: Int, startsMidInnings: Bool) ->
     (detail.batters, detail.bowlers) = playersFor(items)
     detail.period = period
     detail.battingTeam = latest.team?.displayName.flatMap { $0.isEmpty ? nil : $0 }
+    detail.inningsBatters = inningsBatters(items)
     let inn = latest.innings
     detail.crr = inn?.runRate
     if let target = inn?.target, target > 0 {

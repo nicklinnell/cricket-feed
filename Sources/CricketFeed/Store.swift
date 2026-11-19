@@ -146,7 +146,7 @@ final class ScoreStore: ObservableObject {
             let fresh = try await fetchMatches()
             matches = fresh
             await refreshDetails()
-            for alert in milestones.update(matches: fresh, details: details, alertFor: alertsAllowed) {
+            for alert in milestones.update(matches: fresh, details: details, following: isWatched, alertFor: alertsAllowed) {
                 notifier.send(alert)
             }
             lastUpdated = Date()

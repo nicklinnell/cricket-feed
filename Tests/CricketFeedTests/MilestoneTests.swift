@@ -13,7 +13,7 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
     var d = LiveDetail(overs: [])
     d.period = period
     d.battingTeam = "England"
-    d.batters = batters.map { BatterLine(id: $0.0, name: "Batter \($0.0)", runs: $0.1, balls: 60, fours: 0, sixes: 0) }
+    d.inningsBatters = batters.map { BatterLine(id: $0.0, name: "Batter \($0.0)", runs: $0.1, balls: 60, fours: 0, sixes: 0) }
     return d
 }
 
@@ -41,8 +41,8 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
 @Suite struct MilestoneTracking {
     var tracker = MilestoneTracker()
 
-    mutating func step(_ m: Match, _ details: [String: LiveDetail] = [:], allowed: Bool = true) -> [String] {
-        tracker.update(matches: [m], details: details) { _ in allowed }.map(\.body)
+    mutating func step(_ m: Match, _ details: [String: LiveDetail] = [:], allowed: Bool = true, following: Bool = true) -> [String] {
+        tracker.update(matches: [m], details: details, following: { _ in following }) { _ in allowed }.map(\.body)
     }
 
     @Test mutating func firstSightIsSilent() {
@@ -105,10 +105,10 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(step(scored([("1", "560/3")]), ["m1": detail([("A", 352)])]) == ["Batter A (England) reaches 350"])
     }
 
-    @Test mutating func detailBackAfterAGapStartsAfresh() {
-        // Ball-by-ball stops (match stopped), then comes back with A past 100 and a new batter C.
+    @Test mutating func detailBackAfterStoppingStartsAfresh() {
+        // User stops the match, so ball-by-ball stops. It comes back with A past 100 and a new batter C.
         _ = step(scored([("1", "100/1")]), ["m1": detail([("A", 20), ("B", 10)])])
-        #expect(step(scored([("1", "250/2")])) == ["England pass 200. Wicket: England 250/2"])
+        #expect(step(scored([("1", "250/2")]), following: false) == ["England pass 200. Wicket: England 250/2"])
         #expect(step(scored([("1", "250/2")]), ["m1": detail([("A", 131), ("C", 120)])]) == [])
         #expect(step(scored([("1", "270/2")]), ["m1": detail([("A", 151), ("C", 120)])]) == ["Batter A (England) reaches 150"])
     }
@@ -125,6 +125,17 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         _ = step(scored([("1", "100/1")]))
         #expect(step(scored([("1", "100/1")]), ["m1": detail([("A", 75)])]) == [])
         #expect(step(scored([("1", "100/1")]), ["m1": detail(period: 2, [("A", 60)])]) == [])
+    }
+
+    @Test mutating func detailGapWhileFollowingKeepsMilestones() {
+        // Match ends (detail dropped) or one poll lacks detail: the 100 still fires later.
+        _ = step(scored([("1", "100/1")]), ["m1": detail([("A", 48)])])
+        #expect(step(scored([("1", "104/1")])) == [])
+        #expect(step(scored([("1", "160/1")]), ["m1": detail([("A", 101)])]) == ["Batter A (England) reaches 100"])
+        // Gone from the feed for a poll: also kept.
+        _ = tracker.update(matches: [], details: [:]) { _ in true }
+        #expect(step(scored([("1", "170/1")]), ["m1": detail([("A", 102)])]) == [])
+        #expect(step(scored([("1", "190/1")]), ["m1": detail([("A", 150)])]) == ["Batter A (England) reaches 150"])
     }
 
     @Test mutating func resultWaitsForSummary() {
@@ -161,6 +172,18 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
     @Test func takenFromLatestBall() throws {
         let d = buildLiveDetail(try items([ball(over: 1, runs: 1, team: "England")]), period: 1, startsMidInnings: false)
         #expect(d?.battingTeam == "England")
+    }
+
+    @Test func outBattersKeepTheirBestTotal() throws {
+        // A on 52 is out on the last ball; the panel rows drop A, the milestone list keeps them.
+        let balls = try items([
+            ball(over: 1, runs: 1, striker: "A", nonStriker: "B"),
+            ball(over: 1, runs: 0, out: "A", striker: "A", nonStriker: "B"),
+        ])
+        let d = buildLiveDetail(balls, period: 1, startsMidInnings: false)
+        #expect(d?.batters.map(\.id) == ["B"])
+        #expect(d?.inningsBatters.map(\.id) == ["A", "B"])
+        #expect(d?.inningsBatters.first?.runs == 10)
     }
 
     @Test func blankTeamIsNil() throws {
@@ -266,6 +289,51 @@ extension NetworkTests {
                 MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Wicket: England 42/1"),
                 MilestoneAlert(matchID: "m1", title: "England v Australia", body: "England all out for 42. Australia won by 9 wkts"),
             ])
+        }
+
+        // Ball-by-ball through the real store: batter A goes 48 -> 52.
+        @Test func refreshSendsBatterMilestones() async {
+            StubURLProtocol.reset()
+            func pbp(_ runs: Int) -> String {
+                let item = ball(over: 1, runs: 1).replacingOccurrences(of: #""totalRuns":10"#, with: #""totalRuns":\#(runs)"#)
+                return #"{"commentary":{"pageCount":1,"items":["# + item + "]}}"
+            }
+            let pbpPrefix = "https://site.web.api.espn.com/apis/site/v2/sports/cricket/1/playbyplay?event=m1&"
+            let s = ScoreStore(defaults: temp.defaults)
+            let n = RecordingNotifier()
+            s.notifier = n
+            s.favourites = ["1": "England"]
+            s.hidden = ["m2"]
+            StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("100/1"))
+            StubURLProtocol.on(prefix: pbpPrefix, json: pbp(48))
+            await s.refresh()
+            StubURLProtocol.on(prefix: pbpPrefix, json: pbp(52))
+            await s.refresh()
+            #expect(n.sent == [MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Batter A (England) reaches 50")])
+        }
+
+        // Auto-watch off drops ball-by-ball; back on, the batter's 100 from the gap is old news.
+        @Test func rewatchingDoesNotSendBatterNewsFromTheGap() async {
+            StubURLProtocol.reset()
+            func pbp(_ runs: Int) -> String {
+                let item = ball(over: 1, runs: 1).replacingOccurrences(of: #""totalRuns":10"#, with: #""totalRuns":\#(runs)"#)
+                return #"{"commentary":{"pageCount":1,"items":["# + item + "]}}"
+            }
+            let pbpPrefix = "https://site.web.api.espn.com/apis/site/v2/sports/cricket/1/playbyplay?event=m1&"
+            let s = ScoreStore(defaults: temp.defaults)
+            let n = RecordingNotifier()
+            s.notifier = n
+            s.favourites = ["1": "England"]
+            s.hidden = ["m2"]
+            StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("100/1"))
+            StubURLProtocol.on(prefix: pbpPrefix, json: pbp(48))
+            await s.refresh()
+            s.autoWatch = false
+            await s.refresh()
+            s.autoWatch = true
+            StubURLProtocol.on(prefix: pbpPrefix, json: pbp(120))
+            await s.refresh()
+            #expect(n.sent.isEmpty)
         }
     }
 }

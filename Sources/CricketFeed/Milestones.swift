@@ -51,18 +51,22 @@ struct MilestoneAlert: Equatable {
 struct MilestoneTracker {
     private(set) var reached: Set<String> = []
     private var seenMatches: Set<String> = []
-    // Ball-by-ball keys ("match/innings") present last update. Detail that was
-    // missing (match stopped, auto-watch off) starts again from scratch.
-    private var lastDetails: Set<String> = []
+    // Ball-by-ball keys ("match/innings") with a starting point. Dropped when
+    // the user stops following the match, so coming back doesn't fire what
+    // happened meanwhile. A feed blip or the match ending keeps them.
+    private var trackedDetails: Set<String> = []
     private var seenLive: Set<String> = []
 
     // Call once per refresh with every match in the feed. `alertFor` says which
     // matches may alert (favourite, not stopped, setting on). The rest are
     // still tracked, so turning alerts on later doesn't fire old news.
-    mutating func update(matches: [Match], details: [String: LiveDetail], alertFor: (Match) -> Bool) -> [MilestoneAlert] {
+    // `following` says which matches are in the panel (and so get ball-by-ball).
+    mutating func update(matches: [Match], details: [String: LiveDetail],
+                         following: (Match) -> Bool = { _ in true }, alertFor: (Match) -> Bool) -> [MilestoneAlert] {
         var alerts: [MilestoneAlert] = []
-        var nowDetails: Set<String> = []
-        defer { lastDetails = nowDetails }
+        for match in matches where details[match.id] == nil && !following(match) {
+            trackedDetails = trackedDetails.filter { !$0.hasPrefix(match.id + "/") }
+        }
         for match in matches {
             var lines: [String] = []
             let firstSight = seenMatches.insert(match.id).inserted
@@ -91,11 +95,10 @@ struct MilestoneTracker {
 
             if let d = details[match.id] {
                 let dKey = "\(match.id)/\(d.period)"
-                let firstDetail = !lastDetails.contains(dKey)
-                nowDetails.insert(dKey)
-                for b in d.batters {
+                let firstDetail = trackedDetails.insert(dKey).inserted
+                for b in d.inningsBatters {
                     let marks = stride(from: 50, through: b.runs, by: 50).filter { reach("\(dKey)/\(b.id)/\($0)") }
-                    if !firstSight, !firstDetail, let top = marks.max() {
+                    if !firstDetail, let top = marks.max() {
                         let team = d.battingTeam.map { " (\($0))" } ?? ""
                         lines.append("\(b.name)\(team) reaches \(top)")
                     }
