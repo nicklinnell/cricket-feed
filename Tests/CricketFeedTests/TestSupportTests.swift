@@ -3,6 +3,7 @@ import Testing
 @testable import CricketFeed
 
 // Checks the click helper itself works, so view tests can rely on it.
+extension UITests {
 @MainActor @Suite struct TestSupportChecks {
     @Test func clickFiresButton() {
         final class Box { var n = 0 }
@@ -14,4 +15,5 @@ import Testing
         click(v, at: CGPoint(x: 100, y: 20))
         #expect(box.n == 1)
     }
+}
 }
