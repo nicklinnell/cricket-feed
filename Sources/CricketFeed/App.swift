@@ -28,10 +28,16 @@ final class FloatingPanel: NSPanel {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let store = ScoreStore()
+    let store: ScoreStore
     let room = PanelRoom()
     var panel: FloatingPanel!
     var statusItem: NSStatusItem!
+
+    // Tests pass a store on a throwaway defaults suite.
+    init(store: ScoreStore? = nil) {
+        self.store = store ?? ScoreStore()
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let hosting = NSHostingView(rootView: ContentView(store: store, room: room) { [weak self] size in
@@ -59,8 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu bar icon to show/hide and quit (the app has no Dock icon).
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "cricket.ball", accessibilityDescription: "Cricket")
-            ?? NSImage(systemSymbolName: "sportscourt", accessibilityDescription: "Cricket")
+        statusItem.button?.image = Self.statusIcon()
         statusItem.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show / Hide Scores", action: #selector(togglePanel), keyEquivalent: "s"))
@@ -89,6 +94,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if abs(self.room.height - room) > 1 { self.room.height = room }
     }
 
+    // First SF Symbol this macOS has, as older versions lack the cricket ball.
+    static func statusIcon(_ names: [String] = ["cricket.ball", "sportscourt"]) -> NSImage? {
+        for name in names {
+            if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Cricket") { return image }
+        }
+        return nil
+    }
+
     @objc func togglePanel() {
         if panel.isVisible { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
     }
@@ -96,9 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main
 struct Main {
-    static func main() {
+    // Tests swap this to launch with a throwaway store.
+    @MainActor static var makeDelegate: () -> AppDelegate = { AppDelegate() }
+
+    @MainActor static func main() {
         let app = NSApplication.shared
-        let delegate = AppDelegate()
+        let delegate = makeDelegate()
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()
