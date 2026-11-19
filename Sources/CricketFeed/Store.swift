@@ -104,9 +104,19 @@ final class ScoreStore: ObservableObject {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(nanoseconds: (self?.refreshSeconds ?? 10) * 1_000_000_000)
+                // Ends once the store is gone, instead of spinning on without it.
+                guard let seconds = self?.refreshSeconds else { return }
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             }
         }
+    }
+
+    // Ends the refresh loop and waits until it has finished.
+    func stop() async {
+        let old = loop
+        loop = nil
+        old?.cancel()
+        await old?.value
     }
 
     func refresh() async {
