@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.notifier = SystemNotifier.makeIfBundled()
+        if store.notifyMilestones && !store.favourites.isEmpty { store.notifier.requestPermission() }
         let hosting = NSHostingView(rootView: ContentView(store: store, room: room) { [weak self] size in
             self?.fitPanel(to: size)
         })

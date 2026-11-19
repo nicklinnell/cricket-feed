@@ -43,7 +43,7 @@ struct ContentView: View {
             header
             switch mode {
             case .matches: MatchPicker(store: store, maxHeight: room.maxListHeight - 36)
-            case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 64)
+            case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 88)
             case .scores: watchedList
             }
             if Self.showsFooter(store, mode: mode) { footer }

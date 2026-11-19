@@ -27,6 +27,14 @@ final class ScoreStore: ObservableObject {
         didSet { defaults.set(autoWatch, forKey: Self.autoWatchKey) }
     }
 
+    // Notifications for favourite teams' wickets, landmarks and results.
+    @Published var notifyMilestones: Bool {
+        didSet {
+            defaults.set(notifyMilestones, forKey: Self.notifyKey)
+            if notifyMilestones { notifier.requestPermission() }
+        }
+    }
+
     // Matches the user stopped watching. Keeps auto-watch from adding them back.
     @Published var hidden: Set<String> {
         didSet { defaults.set(Array(hidden), forKey: Self.hiddenKey) }
@@ -37,8 +45,13 @@ final class ScoreStore: ObservableObject {
     static let favouritesKey = "favouriteTeamIDs"
     static let autoWatchKey = "autoWatchFavourites"
     static let hiddenKey = "hiddenMatchIDs"
+    static let notifyKey = "notifyFavouriteMilestones"
     // Seconds between feed checks. Tests shorten it.
     var refreshSeconds: UInt64 = 10
+
+    // The app swaps in the real one; tests use a recorder.
+    var notifier: MilestoneNotifier = SilentNotifier()
+    private(set) var milestones = MilestoneTracker()
 
     private var loop: Task<Void, Never>?
     private let defaults: UserDefaults
@@ -52,6 +65,12 @@ final class ScoreStore: ObservableObject {
         // On unless turned off. bool(forKey:) also reads "NO" passed on the command line.
         autoWatch = defaults.object(forKey: Self.autoWatchKey) == nil || defaults.bool(forKey: Self.autoWatchKey)
         hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
+        notifyMilestones = defaults.object(forKey: Self.notifyKey) == nil || defaults.bool(forKey: Self.notifyKey)
+    }
+
+    // Alerts go out for favourite teams' matches the user hasn't stopped watching.
+    func alertsAllowed(for match: Match) -> Bool {
+        notifyMilestones && hasFavourite(match) && !hidden.contains(match.id)
     }
 
     // Anything that could put a card on screen: picked matches or auto-watched teams.
@@ -126,6 +145,9 @@ final class ScoreStore: ObservableObject {
             let fresh = try await fetchMatches()
             matches = fresh
             await refreshDetails()
+            for alert in milestones.update(matches: fresh, details: details, alertFor: alertsAllowed) {
+                notifier.send(alert)
+            }
             lastUpdated = Date()
             error = nil
         } catch {

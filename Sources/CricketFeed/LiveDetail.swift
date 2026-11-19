@@ -112,6 +112,7 @@ struct LiveDetail: Hashable {
     var batters: [BatterLine] = []
     var bowlers: [BowlerLine] = []
     var period = 0            // innings these figures belong to
+    var battingTeam: String?  // for "Root (England) reaches 100"
 
     var rates: [(label: String, value: String)] {
         var out: [(label: String, value: String)] = []
@@ -295,6 +296,7 @@ func buildLiveDetail(_ items: [PBPItem], period: Int, startsMidInnings: Bool) ->
     var detail = LiveDetail(overs: overs)
     (detail.batters, detail.bowlers) = playersFor(items)
     detail.period = period
+    detail.battingTeam = latest.team?.displayName.flatMap { $0.isEmpty ? nil : $0 }
     let inn = latest.innings
     detail.crr = inn?.runRate
     if let target = inn?.target, target > 0 {
