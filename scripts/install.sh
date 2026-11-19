@@ -18,7 +18,15 @@ if [[ ! -d "$DEST" ]]; then
     echo "No such folder: $DEST" >&2
     exit 1
 fi
-if [[ ! -w "$DEST" ]]; then
+TARGET="$DEST/$APP_NAME"
+# Normal case: swap the whole app in DEST.
+# If DEST isn't writable (e.g. /Applications for a non-admin user) but you own
+# the installed app, update it in place by swapping its Contents folder instead.
+if [[ -w "$DEST" ]]; then
+    IN_PLACE=0
+elif [[ -d "$TARGET" && ! -L "$TARGET" && -w "$TARGET" ]]; then
+    IN_PLACE=1
+else
     echo "Can't write to: $DEST" >&2
     exit 1
 fi
@@ -29,16 +37,23 @@ fi
 
 ./scripts/build-app.sh
 
-TARGET="$DEST/$APP_NAME"
-# Private work folder per run, next to the target, so the final swap is a same-disk rename.
-WORK="$(mktemp -d "$DEST/.CricketFeed-install.XXXXXX")"
-STAGE="$WORK/$APP_NAME"
-OLD="$WORK/old.app"
+# Private work folder per run, next to what we replace, so the final swap is a same-disk rename.
+if (( IN_PLACE )); then
+    WORK="$(mktemp -d "$TARGET/.install.XXXXXX")"
+    REPLACE="$TARGET/Contents"
+    STAGE="$WORK/$APP_NAME/Contents"
+    OLD="$WORK/old-Contents"
+else
+    WORK="$(mktemp -d "$DEST/.CricketFeed-install.XXXXXX")"
+    REPLACE="$TARGET"
+    STAGE="$WORK/$APP_NAME"
+    OLD="$WORK/old.app"
+fi
 cleanup() {
-    # If we stopped between the two moves, put the old app back.
-    if [[ ! -e "$TARGET" && ! -L "$TARGET" ]] && [[ -e "$OLD" || -L "$OLD" ]]; then
-        if ! mv "$OLD" "$TARGET"; then
-            echo "Old app left at $OLD" >&2
+    # If we stopped between the two moves, put the old one back.
+    if [[ ! -e "$REPLACE" && ! -L "$REPLACE" ]] && [[ -e "$OLD" || -L "$OLD" ]]; then
+        if ! mv "$OLD" "$REPLACE"; then
+            echo "Old copy left at $OLD" >&2
             return
         fi
     fi
@@ -49,8 +64,8 @@ trap 'exit 130' INT TERM HUP
 
 # Copy next to the target first, so a failed copy leaves the old app alone.
 # ditto keeps the code signature and bundle metadata intact.
-ditto "build/$APP_NAME" "$STAGE"
-codesign --verify --strict "$STAGE"
+ditto "build/$APP_NAME" "$WORK/$APP_NAME"
+codesign --verify --strict "$WORK/$APP_NAME"
 
 # Quit the installed copy (only that one, not a dev build) so we can swap it.
 # Done after the build, so a failed build leaves the old app running.
@@ -62,10 +77,12 @@ if pkill -TERM -xf "$EXE" 2>/dev/null; then
     pkill -KILL -xf "$EXE" 2>/dev/null || true
 fi
 
-if [[ -e "$TARGET" || -L "$TARGET" ]]; then
-    mv "$TARGET" "$OLD"
+if [[ -e "$REPLACE" || -L "$REPLACE" ]]; then
+    mv "$REPLACE" "$OLD"
 fi
-mv "$STAGE" "$TARGET"
+mv "$STAGE" "$REPLACE"
+# In place, the work folder sits inside the app; remove it before checking the signature.
+(( IN_PLACE )) && rm -rf "$WORK"
 # Catch a clash with another install running at the same time.
 codesign --verify --strict "$TARGET"
 

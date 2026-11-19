@@ -17,7 +17,7 @@ open build/CricketFeed.app
 ./scripts/install.sh
 ```
 
-Builds the app and copies it into `/Applications`. Run it again to update. If the app is running, it gets restarted on the new version.
+Builds the app and copies it into `/Applications`. Run it again to update. If you can't write to `/Applications` but own the installed app, it updates the app in place. If the app is running, it gets restarted on the new version.
 
 ### Auto-update
 
