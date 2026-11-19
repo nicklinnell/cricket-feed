@@ -8,28 +8,28 @@ final class ScoreStore: ObservableObject {
     @Published var lastUpdated: Date?
     @Published var error: String?
     @Published var watched: Set<String> {
-        didSet { UserDefaults.standard.set(Array(watched), forKey: Self.watchedKey) }
+        didSet { defaults.set(Array(watched), forKey: Self.watchedKey) }
     }
 
     // Cards with the batters & bowlers table open. Remembered across launches.
     @Published var statsOpen: Set<String> {
-        didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
+        didSet { defaults.set(Array(statsOpen), forKey: Self.statsOpenKey) }
     }
 
     // Favourite teams: ESPN team ID -> name. IDs, not names, so a renamed or
     // differently spelled team still matches. Name is for showing in the list.
     @Published var favourites: [String: String] {
-        didSet { UserDefaults.standard.set(favourites, forKey: Self.favouritesKey) }
+        didSet { defaults.set(favourites, forKey: Self.favouritesKey) }
     }
 
     // When on, favourite teams' matches go in the panel without being picked.
     @Published var autoWatch: Bool {
-        didSet { UserDefaults.standard.set(autoWatch, forKey: Self.autoWatchKey) }
+        didSet { defaults.set(autoWatch, forKey: Self.autoWatchKey) }
     }
 
     // Matches the user stopped watching. Keeps auto-watch from adding them back.
     @Published var hidden: Set<String> {
-        didSet { UserDefaults.standard.set(Array(hidden), forKey: Self.hiddenKey) }
+        didSet { defaults.set(Array(hidden), forKey: Self.hiddenKey) }
     }
 
     static let watchedKey = "watchedMatchIDs"
@@ -40,14 +40,17 @@ final class ScoreStore: ObservableObject {
     let refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
+    private let defaults: UserDefaults
 
-    init() {
-        watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
-        statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
-        favourites = UserDefaults.standard.dictionary(forKey: Self.favouritesKey) as? [String: String] ?? [:]
+    // Tests pass their own defaults so they never touch the user's saved choices.
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        watched = Set(defaults.stringArray(forKey: Self.watchedKey) ?? [])
+        statsOpen = Set(defaults.stringArray(forKey: Self.statsOpenKey) ?? [])
+        favourites = defaults.dictionary(forKey: Self.favouritesKey) as? [String: String] ?? [:]
         // On unless turned off. bool(forKey:) also reads "NO" passed on the command line.
-        autoWatch = UserDefaults.standard.object(forKey: Self.autoWatchKey) == nil || UserDefaults.standard.bool(forKey: Self.autoWatchKey)
-        hidden = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? [])
+        autoWatch = defaults.object(forKey: Self.autoWatchKey) == nil || defaults.bool(forKey: Self.autoWatchKey)
+        hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
     }
 
     // Anything that could put a card on screen: picked matches or auto-watched teams.

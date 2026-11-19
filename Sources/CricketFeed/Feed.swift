@@ -116,6 +116,11 @@ func fetchMatches() async throws -> [Match] {
     if let http = response as? HTTPURLResponse, http.statusCode != 200 {
         throw FeedError.badStatus(http.statusCode)
     }
+    return try parseMatches(data)
+}
+
+// Feed JSON -> matches. Kept apart from the network call so tests can feed it fixtures.
+func parseMatches(_ data: Data) throws -> [Match] {
     let panel = try JSONDecoder().decode(ScorePanel.self, from: data)
 
     var result: [Match] = []

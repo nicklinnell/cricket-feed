@@ -261,6 +261,12 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     for p in firstPage...lastPage {
         items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
     }
+    return buildLiveDetail(items, period: match.period, startsMidInnings: firstPage > 1)
+}
+
+// Play-by-play items -> what the card shows. No network, so tests can feed it fixtures.
+// startsMidInnings: items don't begin at page 1, so the oldest over is probably cut off.
+func buildLiveDetail(_ items: [PBPItem], period: Int, startsMidInnings: Bool) -> LiveDetail? {
     // The feed sometimes ends with an empty filler item (no players, no team, zeroed rates). Skip it.
     guard let latest = items.last(where: { $0.batsman?.athlete?.id != nil || !($0.team?.displayName ?? "").isEmpty }) else { return nil }
 
@@ -275,12 +281,12 @@ func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     }
     let numbers = byOver.keys.sorted()
     // If we didn't start at page 1, the oldest over is probably cut off. Drop it.
-    let shown = firstPage > 1 && numbers.count > 1 ? Array(numbers.dropFirst()) : numbers
+    let shown = startsMidInnings && numbers.count > 1 ? Array(numbers.dropFirst()) : numbers
     let overs = shown.map { OverSummary(number: $0, balls: byOver[$0]!) }
 
     var detail = LiveDetail(overs: overs)
     (detail.batters, detail.bowlers) = playersFor(items)
-    detail.period = match.period
+    detail.period = period
     let inn = latest.innings
     detail.crr = inn?.runRate
     if let target = inn?.target, target > 0 {
