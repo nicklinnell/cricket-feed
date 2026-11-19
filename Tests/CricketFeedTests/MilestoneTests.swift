@@ -194,6 +194,29 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(buildLiveDetail(balls, period: 1, startsMidInnings: false)?.inningsBatters.first?.runs == 49)
     }
 
+    @Test func missingTotalKeepsLastKnown() throws {
+        let balls = try items([
+            ball(over: 1, runs: 1, strikerRuns: 52),
+            ball(over: 1, runs: 0, strikerRuns: nil),
+        ])
+        #expect(buildLiveDetail(balls, period: 1, startsMidInnings: false)?.inningsBatters.first?.runs == 52)
+    }
+
+    // Through the tracker: a corrected 52 -> 49 doesn't use up the 50, and a
+    // ball with no total doesn't hide one.
+    @Test func correctionThenRealFiftyAlertsOnce() throws {
+        let m = Match(id: "m1", leagueID: "1", league: "Test", title: "England v Australia", detail: "",
+                      state: "in", stateLabel: "", summary: "", fullDescription: "", period: 1,
+                      sides: [Match.Side(id: "1", name: "England", short: "", score: "100/1")])
+        func d(_ runs: [Int?]) throws -> [String: LiveDetail] {
+            ["m1": buildLiveDetail(try items(runs.map { ball(over: 1, runs: 0, strikerRuns: $0) }), period: 1, startsMidInnings: false)!]
+        }
+        var t = MilestoneTracker()
+        _ = t.update(matches: [m], details: try d([52, 49])) { _ in true }
+        #expect(t.update(matches: [m], details: try d([52, nil])) { _ in true }.map(\.body) == ["Batter A (England) reaches 50"])
+        #expect(t.update(matches: [m], details: try d([53])) { _ in true }.isEmpty)
+    }
+
     @Test func blankTeamIsNil() throws {
         let d = buildLiveDetail(try items([ball(over: 1, runs: 1, team: "")]), period: 1, startsMidInnings: false)
         #expect(d?.battingTeam == nil)

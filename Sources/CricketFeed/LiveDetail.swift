@@ -223,8 +223,8 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     return (batters, bowlers)
 }
 
-// Each batter named in the items, first-seen order, with their latest total
-// (so a scoring correction downwards wins).
+// Each batter named in the items, first-seen order, with their latest known
+// total (so a scoring correction downwards wins; a missing total is skipped).
 func inningsBatters(_ items: [PBPItem]) -> [BatterLine] {
     var out: [BatterLine] = []
     for item in items {
@@ -232,7 +232,8 @@ func inningsBatters(_ items: [PBPItem]) -> [BatterLine] {
             guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { continue }
             let line = BatterLine(id: id, name: name, runs: b?.totalRuns ?? 0, balls: b?.faced ?? 0, fours: 0, sixes: 0)
             if let i = out.firstIndex(where: { $0.id == id }) {
-                out[i] = line
+                // A ball with no total says nothing about the score; keep the last real one.
+                if b?.totalRuns != nil { out[i] = line }
             } else {
                 out.append(line)
             }
