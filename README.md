@@ -39,6 +39,7 @@ The icon is `assets/icon-1024.png`. The build turns it into `AppIcon.icns`.
 
 - Press `+` to pick matches. Press Done when finished.
 - Press the star to choose favourite teams (countries, English counties, or any team in the feed). Their matches sit at the top of the match list and the panel. With "Auto-watch my teams' matches" on (the default), they also show up without being picked.
+- With "Notify me of wickets and milestones" on (the default), you get a macOS notification for your teams' matches: each wicket, every 100 team runs, a batter reaching 50, 100, 150 and so on, and the result. Batter alerts only come for matches in your panel, as only those get ball-by-ball data. Stopped matches stay quiet. macOS asks for permission the first time. Nothing fires for what happened before the app saw the match.
 - Drag the window anywhere to move it.
 - Right-click a match to open it on Cricinfo or stop watching it. A stopped match stays stopped until you tick it again in the match list.
 - Menu bar icon: show/hide window, quit. There's no Dock icon.

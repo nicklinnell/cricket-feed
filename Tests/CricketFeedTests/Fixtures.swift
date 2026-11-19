@@ -20,15 +20,15 @@ func ball(
     over: Int, runs: Int = 0, type: String? = nil, wide: Int = 0, noBall: Int = 0,
     complete: Bool = false, out: String? = nil,
     striker: String = "A", nonStriker: String = "B",
-    innings: String = "null", team: String = "England"
+    innings: String = "null", team: String = "England", strikerRuns: Int? = 10, nonStrikerRuns: Int? = 5
 ) -> String {
     let dismissal = out.map { #"{"dismissal":true,"batsman":{"athlete":{"id":"\#($0)"}}}"# } ?? "null"
     return """
     {"scoreValue":\(runs),"playType":{"description":"\(type ?? "run")"},
      "over":{"number":\(over),"wide":\(wide),"noBall":\(noBall),"complete":\(complete)},
      "innings":\(innings),"dismissal":\(dismissal),"team":{"id":"1","displayName":"\(team)"},
-     "batsman":{"athlete":{"id":"\(striker)","displayName":"Batter \(striker)"},"totalRuns":10,"faced":12},
-     "otherBatsman":{"athlete":{"id":"\(nonStriker)","displayName":"Batter \(nonStriker)"},"totalRuns":5,"faced":8},
+     "batsman":{"athlete":{"id":"\(striker)","displayName":"Batter \(striker)"},"totalRuns":\(strikerRuns.map(String.init) ?? "null"),"faced":12},
+     "otherBatsman":{"athlete":{"id":"\(nonStriker)","displayName":"Batter \(nonStriker)"},"totalRuns":\(nonStrikerRuns.map(String.init) ?? "null"),"faced":8},
      "bowler":{"athlete":{"id":"X","displayName":"Bowler X"},"balls":13,"conceded":20,"wickets":1}}
     """
 }

@@ -133,6 +133,12 @@ struct TeamPicker: View {
                 .help(store.autoWatch
                       ? "Their matches go in your panel without picking them"
                       : "Their matches only go to the top of Pick matches")
+            Toggle("Notify me of wickets and milestones", isOn: $store.notifyMilestones)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.system(size: Theme.bodySize))
+                .padding(.horizontal, 4)
+                .help("Wickets, every 100 runs, batters' 50s and 100s, and results")
         }
         .onAppear { searchFocused = true }
     }
