@@ -37,7 +37,8 @@ final class ScoreStore: ObservableObject {
     static let favouritesKey = "favouriteTeamIDs"
     static let autoWatchKey = "autoWatchFavourites"
     static let hiddenKey = "hiddenMatchIDs"
-    let refreshSeconds: UInt64 = 10
+    // Seconds between feed checks. Tests shorten it.
+    var refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
     private let defaults: UserDefaults
@@ -104,9 +105,20 @@ final class ScoreStore: ObservableObject {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(nanoseconds: (self?.refreshSeconds ?? 10) * 1_000_000_000)
+                // Ends once the store is gone, instead of spinning on without it.
+                guard let seconds = self?.refreshSeconds else { return }
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             }
         }
+    }
+
+    // Ends the refresh loop and waits until it has finished. The app never calls
+    // this (the loop runs until quit); tests use it so no loop outlives its test.
+    func stop() async {
+        let old = loop
+        loop = nil
+        old?.cancel()
+        await old?.value
     }
 
     func refresh() async {

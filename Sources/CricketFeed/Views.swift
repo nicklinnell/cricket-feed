@@ -2,7 +2,32 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
-    enum Mode { case scores, matches, teams }
+    enum Mode {
+        case scores, matches, teams
+
+        var title: String {
+            switch self {
+            case .scores: "Cricket"
+            case .matches: "Pick matches"
+            case .teams: "Favourite teams"
+            }
+        }
+    }
+
+    // What the scores list shows instead of cards, or that it shows cards.
+    struct EmptyState: Equatable {
+        let symbol: String
+        let title: String
+        let message: String
+        // Invitations offer the match picker (blue); problems don't (grey).
+        let offersPicker: Bool
+    }
+
+    enum ListContent: Equatable {
+        case empty(EmptyState)
+        case loading(placeholders: Int)
+        case cards
+    }
 
     @ObservedObject var store: ScoreStore
     @ObservedObject var room: PanelRoom
@@ -21,8 +46,7 @@ struct ContentView: View {
             case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 64)
             case .scores: watchedList
             }
-            // "Updated 11:28" means nothing with no matches picked.
-            if store.followingAnything || mode != .scores || store.error != nil { footer }
+            if Self.showsFooter(store, mode: mode) { footer }
         }
         .padding(12)
         .frame(width: Theme.panelWidth)
@@ -37,7 +61,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 4) {
-            Text(title)
+            Text(mode.title)
                 .font(.system(size: Theme.titleSize, weight: .semibold, design: .rounded))
             Spacer()
             if mode != .scores {
@@ -72,14 +96,6 @@ struct ContentView: View {
         .frame(height: 24)
     }
 
-    private var title: String {
-        switch mode {
-        case .scores: "Cricket"
-        case .matches: "Pick matches"
-        case .teams: "Favourite teams"
-        }
-    }
-
     private func refreshNow() async {
         refreshing = true
         if !reduceMotion { withAnimation(.linear(duration: 0.6)) { spin += 360 } }
@@ -87,50 +103,72 @@ struct ContentView: View {
         refreshing = false
     }
 
-    @ViewBuilder
-    private var watchedList: some View {
-        let items = store.watchedMatches
+    static func listContent(_ store: ScoreStore) -> ListContent {
         if !store.followingAnything {
-            EmptyStateView(
+            return .empty(EmptyState(
                 symbol: "figure.cricket",
                 title: "No matches yet",
                 message: store.favourites.isEmpty
                     ? "Pick the games you want to follow, or star your favourite teams, and their scores will show here."
                     : "Pick the games you want to follow. Your teams' games are at the top of the list.",
-                action: ("Pick matches", { mode = .matches })
+                offersPicker: true))
+        }
+        if store.lastUpdated == nil && store.error == nil {
+            return .loading(placeholders: min(max(store.watched.count + (store.autoWatchingTeams ? 1 : 0), 1), 2))
+        }
+        if !store.watchedMatches.isEmpty { return .cards }
+        if store.lastUpdated == nil {
+            return .empty(EmptyState(symbol: "wifi.slash", title: "Can't reach the score feed",
+                                     message: "Will keep trying every few seconds.", offersPicker: false))
+        }
+        return .empty(EmptyState(
+            symbol: "calendar.badge.clock",
+            title: "Nothing on right now",
+            message: !store.autoWatchingTeams
+                ? "Your picked matches aren't in the feed at the moment."
+                : store.matches.contains(where: store.hasFavourite)
+                    ? "You've stopped watching your teams' matches."
+                    : "None of your teams are playing right now.",
+            offersPicker: true))
+    }
+
+    // "Updated 11:28" means nothing with no matches picked.
+    static func showsFooter(_ store: ScoreStore, mode: Mode) -> Bool {
+        store.followingAnything || mode != .scores || store.error != nil
+    }
+
+    static func footerText(error: String?, lastUpdated: Date?) -> String {
+        if error != nil { return lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline" }
+        if let t = lastUpdated { return "Updated \(short(t))" }
+        return "Fetching scores"
+    }
+
+    @ViewBuilder
+    private var watchedList: some View {
+        switch Self.listContent(store) {
+        case .empty(let empty):
+            EmptyStateView(
+                symbol: empty.symbol,
+                title: empty.title,
+                message: empty.message,
+                action: empty.offersPicker ? ("Pick matches", { mode = .matches }) : nil,
+                tint: empty.offersPicker ? .accentColor : Theme.meta
             )
-        } else if store.lastUpdated == nil && store.error == nil {
+        case .loading(let placeholders):
             VStack(spacing: 10) {
-                ForEach(0..<min(max(store.watched.count + (store.autoWatchingTeams ? 1 : 0), 1), 2), id: \.self) { _ in SkeletonCard() }
+                ForEach(0..<placeholders, id: \.self) { _ in SkeletonCard() }
             }
             .frame(maxHeight: room.maxListHeight, alignment: .top)
             .clipped()
-        } else if items.isEmpty {
-            EmptyStateView(
-                symbol: store.lastUpdated == nil ? "wifi.slash" : "calendar.badge.clock",
-                title: store.lastUpdated == nil ? "Can't reach the score feed" : "Nothing on right now",
-                message: store.lastUpdated == nil
-                    ? "Will keep trying every few seconds."
-                    : !store.autoWatchingTeams
-                        ? "Your picked matches aren't in the feed at the moment."
-                        : store.matches.contains(where: store.hasFavourite)
-                            ? "You've stopped watching your teams' matches."
-                            : "None of your teams are playing right now.",
-                action: store.lastUpdated == nil ? nil : ("Pick matches", { mode = .matches }),
-                tint: store.lastUpdated == nil ? Theme.meta : .accentColor
-            )
-        } else {
+        case .cards:
             // Scrolls only once the cards would be taller than the screen allows.
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(items) { match in
+                    ForEach(store.watchedMatches) { match in
                         MatchCard(match: match, detail: store.details[match.id],
                                   statsOpen: store.statsOpen.contains(match.id),
                                   toggleStats: { store.toggleStats(match) })
-                            .contextMenu {
-                                Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
-                                Button("Stop watching") { store.toggle(match) }
-                            }
+                            .contextMenu { MatchCardMenu(match: match, store: store) }
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
@@ -145,18 +183,17 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 5) {
+            let text = Self.footerText(error: store.error, lastUpdated: store.lastUpdated)
             if let err = store.error {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.pausedInk)
-                Text(store.lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline")
+                Text(text)
                     .foregroundStyle(Theme.pausedInk)
                     .help(err)
                     .accessibilityHint(err)
-            } else if let t = store.lastUpdated {
-                Text("Updated \(short(t))")
             } else {
-                ProgressView().controlSize(.mini)
-                Text("Fetching scores")
+                if store.lastUpdated == nil { ProgressView().controlSize(.mini) }
+                Text(text)
             }
             Spacer()
         }
@@ -168,7 +205,7 @@ struct ContentView: View {
 
     private var scrolls: Bool { listHeight > room.maxListHeight }
 
-    private func short(_ d: Date) -> String {
+    static func short(_ d: Date) -> String {
         d.formatted(date: .omitted, time: .shortened)
     }
 }
@@ -253,11 +290,11 @@ struct MatchCard: View {
         .accessibilityLabel([match.fullDescription.isEmpty ? title : match.fullDescription, match.stateLabel].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
-    private var title: String {
+    var title: String {
         match.detail.isEmpty ? match.league : match.detail + dayNight
     }
 
-    private var secondLine: String {
+    var secondLine: String {
         let league = match.detail.isEmpty ? "" : match.league
         if phase == .upcoming, !date.isEmpty {
             return [date, league].filter { !$0.isEmpty }.joined(separator: "  ·  ")
@@ -267,17 +304,17 @@ struct MatchCard: View {
 
     // Ball-by-ball extras only while the match is in play (live or a break).
     // Hidden as soon as a new innings starts, so last innings' players never sit under the new score.
-    private var liveDetail: LiveDetail? {
+    var liveDetail: LiveDetail? {
         match.isLive && detail?.period == match.period ? detail : nil
     }
 
     // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
-    private var summaryText: String {
+    var summaryText: String {
         liveDetail?.chase ?? match.summary
     }
 
     // Results and live play read as headline text; toss news and start times stay quiet.
-    private var summaryStrong: Bool {
+    var summaryStrong: Bool {
         switch phase {
         case .finished: true
         case .live, .paused: !match.summary.localizedCaseInsensitiveContains("won toss") || liveDetail?.chase != nil
@@ -287,7 +324,7 @@ struct MatchCard: View {
 
     // "3rd ODI (D/N), England tour of Australia at Hobart, Nov 18 2026"
     //  -> dayNight " (D/N)", venue "Hobart, Nov 18 2026".
-    private var dayNight: String {
+    var dayNight: String {
         let full = match.fullDescription
         guard full.hasPrefix(match.detail) else { return "" }
         let rest = full.dropFirst(match.detail.count)
@@ -295,27 +332,40 @@ struct MatchCard: View {
         return String(rest[...close])
     }
 
-    private var venue: String {
+    var venue: String {
         guard let r = match.fullDescription.range(of: " at ", options: .backwards) else { return "" }
         return String(match.fullDescription[r.upperBound...])
     }
 
     // "Hobart, Nov 18 2026" -> city "Hobart", date "Nov 18 2026". No comma: all of it is the city.
-    private var city: String {
+    var city: String {
         guard let comma = venue.firstIndex(of: ",") else { return venue }
         return String(venue[..<comma])
     }
 
-    private var date: String {
+    var date: String {
         guard let comma = venue.firstIndex(of: ",") else { return "" }
         return venue[venue.index(after: comma)...].trimmingCharacters(in: .whitespaces)
     }
 
     // Best guess: in live play, the only side whose score has overs in brackets is batting.
-    private var battingSide: Match.Side? {
+    var battingSide: Match.Side? {
         guard phase == .live || (phase == .paused && !match.stateLabel.localizedCaseInsensitiveContains("innings")) else { return nil }
         let withOvers = match.sides.filter { !ScoreParts($0.score).detail.isEmpty }
         return withOvers.count == 1 ? withOvers[0] : nil
+    }
+}
+
+// Right-click menu on a card. Own view so tests can host it and click its buttons.
+// Opens links through the environment's openURL (the default browser), which tests replace.
+struct MatchCardMenu: View {
+    let match: Match
+    @ObservedObject var store: ScoreStore
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button("Open on Cricinfo") { openURL(match.cricinfoURL) }
+        Button("Stop watching") { store.toggle(match) }
     }
 }
 
@@ -325,29 +375,44 @@ struct MatchPicker: View {
     @State private var search = ""
     @FocusState private var searchFocused: Bool
 
-    private var filtered: [Match] {
-        let all = store.matches.sorted { a, b in
-            // Live first, then upcoming, then finished.
-            rank(a) == rank(b) ? a.title < b.title : rank(a) < rank(b)
-        }
-        guard !search.isEmpty else { return all }
-        return all.filter {
-            $0.title.localizedCaseInsensitiveContains(search) ||
-            $0.league.localizedCaseInsensitiveContains(search)
-        }
-    }
-
-    private func rank(_ m: Match) -> Int {
+    private static func rank(_ m: Match) -> Int {
         switch m.state { case "in": 0; case "pre": 1; default: 2 }
     }
 
-    private var sections: [(title: String, matches: [Match])] {
+    // The picker's sections, in order, with the matches that survive the search.
+    static func sections(_ matches: [Match], search: String, favourite: (Match) -> Bool) -> [(title: String, matches: [Match])] {
+        var filtered = matches.sorted { a, b in
+            // Live first, then upcoming, then finished.
+            rank(a) == rank(b) ? a.title < b.title : rank(a) < rank(b)
+        }
+        if !search.isEmpty {
+            filtered = filtered.filter {
+                $0.title.localizedCaseInsensitiveContains(search) ||
+                $0.league.localizedCaseInsensitiveContains(search)
+            }
+        }
         // Favourite teams' matches get their own section at the top.
-        let groups = Dictionary(grouping: filtered) { store.hasFavourite($0) ? -1 : rank($0) }
+        let groups = Dictionary(grouping: filtered) { favourite($0) ? -1 : rank($0) }
         return [(-1, "Your teams"), (0, "Live"), (1, "Upcoming"), (2, "Finished")].compactMap { key, title in
             guard let m = groups[key], !m.isEmpty else { return nil }
             return (title, m)
         }
+    }
+
+    // What to show when there are no rows: still loading, feed down, feed empty or no search results.
+    static func emptyState(hasMatches: Bool, loaded: Bool, error: String?, search: String) -> (symbol: String, title: String, message: String) {
+        if !hasMatches && !loaded {
+            return error == nil
+                ? ("hourglass", "Fetching matches", "One moment.")
+                : ("wifi.slash", "Can't reach the score feed", "Will keep trying every few seconds.")
+        }
+        return hasMatches
+            ? ("magnifyingglass", "No results", "Nothing matches \u{201C}\(search)\u{201D}.")
+            : ("magnifyingglass", "No matches in the feed", "Check back soon.")
+    }
+
+    private var sections: [(title: String, matches: [Match])] {
+        Self.sections(store.matches, search: search, favourite: store.hasFavourite)
     }
 
     var body: some View {
@@ -356,23 +421,9 @@ struct MatchPicker: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1, pinnedViews: []) {
                     if sections.isEmpty {
-                        if store.matches.isEmpty && store.lastUpdated == nil {
-                            EmptyStateView(
-                                symbol: store.error == nil ? "hourglass" : "wifi.slash",
-                                title: store.error == nil ? "Fetching matches" : "Can't reach the score feed",
-                                message: store.error == nil ? "One moment." : "Will keep trying every few seconds.",
-                                tint: Theme.meta
-                            )
-                        } else {
-                            EmptyStateView(
-                                symbol: "magnifyingglass",
-                                title: store.matches.isEmpty ? "No matches in the feed" : "No results",
-                                message: store.matches.isEmpty
-                                    ? "Check back soon."
-                                    : "Nothing matches \u{201C}\(search)\u{201D}.",
-                                tint: Theme.meta
-                            )
-                        }
+                        let empty = Self.emptyState(hasMatches: !store.matches.isEmpty, loaded: store.lastUpdated != nil,
+                                                    error: store.error, search: search)
+                        EmptyStateView(symbol: empty.symbol, title: empty.title, message: empty.message, tint: Theme.meta)
                     }
                     ForEach(sections, id: \.title) { section in
                         SectionLabel(title: section.title, first: section.title == sections.first?.title)
@@ -511,26 +562,50 @@ struct PlayersTable: View {
             if !batters.isEmpty {
                 header("Batting", ["R", "B", "4s", "6s", "SR"])
                 ForEach(batters, id: \.id) { b in
-                    row(name: b.name, short: b.shortName, mark: b.onStrike, cells: [
-                        ("\(b.runs)", true), ("\(b.balls)", false), ("\(b.fours)", false), ("\(b.sixes)", false), (b.strikeRate, false),
-                    ])
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes" + (b.balls > 0 ? ", strike rate \(b.strikeRate)" : ""))
+                    row(name: b.name, short: b.shortName, mark: b.onStrike, cells: Self.cells(b))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Self.spoken(b))
                 }
             }
             if !bowlers.isEmpty {
                 header("Bowling", ["O", "M", "R", "W", "ECON"])
                     .padding(.top, batters.isEmpty ? 0 : 6)
                 ForEach(bowlers, id: \.id) { b in
-                    row(name: b.name, short: b.shortName, mark: false, cells: [
-                        (b.overs, false), ("\(b.maidens)", false), ("\(b.conceded)", false), ("\(b.wickets)", true), (b.economy, false),
-                    ])
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets" + (b.balls > 0 ? ", economy \(b.economy)" : ""))
+                    row(name: b.name, short: b.shortName, mark: false, cells: Self.cells(b))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Self.spoken(b))
                 }
             }
         }
         .monospacedDigit()
+    }
+
+    // One number column: its text and whether it's the headline figure (bold).
+    struct Cell: Equatable {
+        let text: String
+        let bold: Bool
+        init(_ text: String, bold: Bool = false) { self.text = text; self.bold = bold }
+    }
+
+    // R B 4s 6s SR, runs in bold.
+    static func cells(_ b: BatterLine) -> [Cell] {
+        [Cell("\(b.runs)", bold: true), Cell("\(b.balls)"), Cell("\(b.fours)"), Cell("\(b.sixes)"), Cell(b.strikeRate)]
+    }
+
+    // O M R W ECON, wickets in bold.
+    static func cells(_ b: BowlerLine) -> [Cell] {
+        [Cell(b.overs), Cell("\(b.maidens)"), Cell("\(b.conceded)"), Cell("\(b.wickets)", bold: true), Cell(b.economy)]
+    }
+
+    // VoiceOver reads a row as a sentence. No rate until a ball has been faced or bowled.
+    static func spoken(_ b: BatterLine) -> String {
+        "\(b.name)\(b.onStrike ? ", on strike" : ""), \(b.runs) off \(b.balls) balls, \(b.fours) fours, \(b.sixes) sixes"
+            + (b.balls > 0 ? ", strike rate \(b.strikeRate)" : "")
+    }
+
+    static func spoken(_ b: BowlerLine) -> String {
+        "\(b.name), \(b.oversSpoken), \(b.maidens) maidens, \(b.conceded) runs, \(b.wickets) wickets"
+            + (b.balls > 0 ? ", economy \(b.economy)" : "")
     }
 
     private func header(_ title: String, _ cols: [String]) -> some View {
@@ -552,7 +627,7 @@ struct PlayersTable: View {
         .accessibilityHidden(true)
     }
 
-    private func row(name: String, short: String, mark: Bool, cells: [(String, Bool)]) -> some View {
+    private func row(name: String, short: String, mark: Bool, cells: [Cell]) -> some View {
         HStack(spacing: 0) {
             // Full name if it fits, else "M Islam", else the feed's short name ("Shanto").
             HStack(spacing: 0) {
@@ -560,7 +635,7 @@ struct PlayersTable: View {
                     Text(name)
                     Text(initialled(name))
                     // Feed short name only when it really is shorter ("Shanto"); it's often empty or the full name.
-                    Text(!short.isEmpty && short.count < initialled(name).count ? short : initialled(name)).truncationMode(.tail)
+                    Text(shortest(name, short: short)).truncationMode(.tail)
                 }
                 .lineLimit(1)
                 // Always there, so a name doesn't jump between full and short as strike changes.
@@ -570,9 +645,9 @@ struct PlayersTable: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(name)
             ForEach(Array(cells.enumerated()), id: \.offset) { i, cell in
-                Text(cell.0)
-                    .font(.system(size: Theme.bodySize, weight: cell.1 ? .semibold : .regular))
-                    .foregroundStyle(cell.1 ? Color.primary : Theme.meta)
+                Text(cell.text)
+                    .font(.system(size: Theme.bodySize, weight: cell.bold ? .semibold : .regular))
+                    .foregroundStyle(cell.bold ? Color.primary : Theme.meta)
                     .lineLimit(1)
                     .frame(width: Self.widths[i], alignment: .trailing)
             }
@@ -581,10 +656,15 @@ struct PlayersTable: View {
         .frame(height: 22)
     }
 
-    private func initialled(_ name: String) -> String {
+    func initialled(_ name: String) -> String {
         let parts = name.split(separator: " ")
         guard parts.count > 1, let first = parts.first?.first else { return name }
         return "\(first) " + parts.dropFirst().joined(separator: " ")
+    }
+
+    // Last resort when even "M Islam" won't fit.
+    func shortest(_ name: String, short: String) -> String {
+        !short.isEmpty && short.count < initialled(name).count ? short : initialled(name)
     }
 }
 
@@ -628,8 +708,7 @@ struct RatesRow: View {
 // Mouse users: click the line, then the scroll wheel moves it left/right.
 struct OversLine: View {
     let overs: [OverSummary]
-    @State private var engaged = false
-    @State private var wheel = WheelRedirect()
+    @StateObject private var scroll = OversLineScroll()
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -663,30 +742,47 @@ struct OversLine: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(engaged ? 0.6 : 0), lineWidth: 1)
+                    .strokeBorder(Color.accentColor.opacity(scroll.engaged ? 0.6 : 0), lineWidth: 1)
             )
             .contentShape(Rectangle())
-            .onTapGesture { engaged.toggle() }
-            .onHover { inside in
-                wheel.hovering = inside
-                if !inside { engaged = false }
-            }
-            .onChange(of: engaged) { _, on in wheel.active = on }
+            .onTapGesture { scroll.tap() }
+            .onHover { scroll.hover($0) }
             .onChange(of: lastBallKey) { _, _ in
                 // New ball: jump to it, unless the user is busy looking back.
-                guard !engaged else { return }
+                guard !scroll.engaged else { return }
                 guard let n = overs.last?.number else { return }
                 withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(n, anchor: .leading) }
             }
-            .onAppear { wheel.start() }
-            .onDisappear { wheel.stop() }
-            .help(engaged ? "Scroll to see earlier overs. Click again to stop." : "Click, then scroll to see earlier overs")
+            .onAppear { scroll.wheel.start() }
+            .onDisappear { scroll.wheel.stop() }
+            .help(scroll.engaged ? "Scroll to see earlier overs. Click again to stop." : "Click, then scroll to see earlier overs")
         }
     }
 
     private var lastBallKey: String {
         guard let last = overs.last else { return "" }
         return "\(last.number)-\(last.balls.count)"
+    }
+}
+
+// Click-to-scroll state for the overs line. A click engages it, a second click
+// or the pointer leaving disengages it. The wheel is redirected only while
+// engaged and hovered.
+final class OversLineScroll: ObservableObject {
+    @Published private(set) var engaged = false
+    let wheel = WheelRedirect()
+
+    func tap() {
+        engaged.toggle()
+        wheel.active = engaged
+    }
+
+    func hover(_ inside: Bool) {
+        wheel.hovering = inside
+        if !inside {
+            engaged = false
+            wheel.active = false
+        }
     }
 }
 
@@ -717,7 +813,8 @@ final class WheelRedirect {
                     cg.setIntegerValueField(vertical, value: 0)
                 }
             }
-            return NSEvent(cgEvent: cg) ?? event
+            guard let redirected = NSEvent(cgEvent: cg) else { return event }
+            return redirected
         }
     }
 
@@ -747,7 +844,7 @@ struct OverGroup: View {
                     .font(.system(size: Theme.bodySize, weight: .semibold))
                     .foregroundStyle(.primary)
                     .monospacedDigit()
-                Text(over.runs == 1 ? "RUN" : "RUNS")
+                Text(runsCaption)
                     .font(.system(size: 8, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(Theme.meta)
@@ -761,10 +858,18 @@ struct OverGroup: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", "))
+        .accessibilityLabel(spoken)
     }
 
-    private func ordinal(_ n: Int) -> String {
+    // Under the run total: "RUN" for exactly one, else "RUNS".
+    var runsCaption: String { over.runs == 1 ? "RUN" : "RUNS" }
+
+    // "40th over, 6 runs: dot, wicket, ..." oldest ball first.
+    var spoken: String {
+        "\(ordinal(over.number)) over, \(over.runs == 1 ? "1 run" : "\(over.runs) runs"): " + over.balls.map(\.spoken).joined(separator: ", ")
+    }
+
+    func ordinal(_ n: Int) -> String {
         let tens = n % 100
         let suffix = (11...13).contains(tens) ? "th" : [1: "st", 2: "nd", 3: "rd"][n % 10] ?? "th"
         return "\(n)\(suffix)"

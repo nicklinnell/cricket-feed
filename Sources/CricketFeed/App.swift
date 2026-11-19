@@ -28,10 +28,16 @@ final class FloatingPanel: NSPanel {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let store = ScoreStore()
+    let store: ScoreStore
     let room = PanelRoom()
     var panel: FloatingPanel!
     var statusItem: NSStatusItem!
+
+    // Tests pass a store on a throwaway defaults suite.
+    init(store: ScoreStore? = nil) {
+        self.store = store ?? ScoreStore()
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let hosting = NSHostingView(rootView: ContentView(store: store, room: room) { [weak self] size in
@@ -59,8 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu bar icon to show/hide and quit (the app has no Dock icon).
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "cricket.ball", accessibilityDescription: "Cricket")
-            ?? NSImage(systemSymbolName: "sportscourt", accessibilityDescription: "Cricket")
+        statusItem.button?.image = Self.statusIcon()
         statusItem.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show / Hide Scores", action: #selector(togglePanel), keyEquivalent: "s"))
@@ -87,6 +92,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
         let room = panel.frame.maxY - screen.visibleFrame.minY
         if abs(self.room.height - room) > 1 { self.room.height = room }
+    }
+
+    // First SF Symbol this macOS has, as older versions lack the cricket ball.
+    static func statusIcon(_ names: [String] = ["cricket.ball", "sportscourt"]) -> NSImage? {
+        for name in names {
+            if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Cricket") { return image }
+        }
+        return nil
     }
 
     @objc func togglePanel() {

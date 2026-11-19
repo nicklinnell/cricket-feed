@@ -7,8 +7,8 @@ struct PBPResponse: Decodable {
 }
 
 struct PBPPage: Decodable {
-    let pageCount: Int
-    let items: [PBPItem]
+    let pageCount: Int?
+    let items: [PBPItem]?
 }
 
 struct PBPItem: Decodable {
@@ -208,8 +208,9 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     }
     // Both seen on the same ball: the one with more balls faced most likely came in first.
     batters.sort { a, b in
-        let fa = firstSeen[a.id] ?? .max, fb = firstSeen[b.id] ?? .max
-        return fa != fb ? fa < fb : (a.balls, a.id) > (b.balls, b.id)
+        // Every batter here came from an item, so both are always in firstSeen.
+        if let fa = firstSeen[a.id], let fb = firstSeen[b.id], fa != fb { return fa < fb }
+        return (a.balls, a.id) > (b.balls, b.id)
     }
 
     // Current bowler first.
@@ -254,12 +255,12 @@ private func fetchPBPPage(_ match: Match, page: Int) async throws -> PBPPage {
 // have at least 5 overs for the "last 5 overs" number.
 func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     let first = try await fetchPBPPage(match, page: 1)
-    let lastPage = first.pageCount
+    let lastPage = first.pageCount ?? 0
     guard lastPage > 0 else { return nil }
     var items: [PBPItem] = []
     let firstPage = max(1, lastPage - 2)
     for p in firstPage...lastPage {
-        items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
+        items += (p == 1 ? first.items : try await fetchPBPPage(match, page: p).items) ?? []
     }
     return buildLiveDetail(items, period: match.period, startsMidInnings: firstPage > 1)
 }
