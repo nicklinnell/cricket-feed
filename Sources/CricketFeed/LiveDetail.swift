@@ -69,6 +69,7 @@ struct PBPInnings: Decodable {
     let remainingRuns: Int?
     let target: Int?
     let ballLimit: Int?
+    let totalRuns: Int?   // runs off this ball alone, extras included
 }
 
 struct PBPDismissal: Decodable {
@@ -191,10 +192,10 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
         batters.removeAll { out.contains($0.id) }
     } else if let striker = batters.first, batters.count == 2 {
         // Who faces next: odd runs run swap ends, and so does the end of an over.
-        // scoreValue includes the 1-run penalty for a wide or no-ball.
+        // The runs include the 1-run penalty for a wide or no-ball.
         let o = latest.over
         let penalty = ((o?.wide ?? 0) > 0 || (o?.noBall ?? 0) > 0) ? 1 : 0
-        let ran = max(0, (latest.scoreValue ?? 0) - penalty)
+        let ran = max(0, ballRuns(latest) - penalty)
         var swap = ran % 2 == 1
         if o?.complete == true { swap.toggle() }
         let next = swap ? batters[1].id : striker.id
@@ -218,8 +219,14 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     return (batters, bowlers)
 }
 
+// Runs off one ball. scoreValue drops byes and leg byes run off a no-ball
+// (it says 1 for a no-ball plus 2 leg byes); the innings block has the full 3.
+func ballRuns(_ item: PBPItem) -> Int {
+    max(item.scoreValue ?? 0, item.innings?.totalRuns ?? 0)
+}
+
 func ballFor(_ item: PBPItem) -> Ball {
-    let runs = item.scoreValue ?? 0
+    let runs = ballRuns(item)
     let o = item.over
     if item.dismissal?.dismissal == true { return Ball(label: "W", kind: .wicket, runs: runs) }
     if (o?.wide ?? 0) > 0 { return Ball(label: "\(runs)wd", kind: .extra, runs: runs) }
