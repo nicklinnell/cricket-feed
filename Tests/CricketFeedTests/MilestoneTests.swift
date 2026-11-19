@@ -32,7 +32,7 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(parseInnings(text) == expected)
     }
 
-    @Test(arguments: ["Yet to bat", "12/11", "1/2/3", "/4"])
+    @Test(arguments: ["Yet to bat", "12/11", "1/2/3", "/4", "abc 25", "(25 ov)"])
     func oddTextReadsAsNil(text: String) {
         #expect(parseInnings(text) == nil)
     }
@@ -66,7 +66,7 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
 
     @Test mutating func gapGroupsWicketsIntoOneAlert() {
         _ = step(scored([("1", "40/0")]))
-        #expect(step(scored([("1", "230/3")])) == ["3 wickets: England 230/3"])
+        #expect(step(scored([("1", "230/3")])) == ["England pass 200. 3 wickets: England 230/3"])
     }
 
     @Test mutating func hundredsWithoutWicket() {
@@ -88,9 +88,29 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
     }
 
     @Test mutating func bothSidesInOneAlert() {
-        _ = step(scored([("1", "300"), ("2", "99/0")]))
-        let alerts = tracker.update(matches: [scored([("1", "300"), ("2", "104/1")])], details: [:]) { _ in true }
-        #expect(alerts == [MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Wicket: Australia 104/1")])
+        _ = step(scored([("1", "290/9"), ("2", "")]))
+        let alerts = tracker.update(matches: [scored([("1", "300"), ("2", "4/1")])], details: [:]) { _ in true }
+        #expect(alerts == [MilestoneAlert(matchID: "m1", title: "England v Australia",
+                                          body: "England pass 300. England all out for 300. Wicket: Australia 4/1")])
+    }
+
+    @Test mutating func wicketDoesNotSwallowLandmark() {
+        _ = step(scored([("1", "98/2")]))
+        #expect(step(scored([("1", "102/3")])) == ["England pass 100. Wicket: England 102/3"])
+        #expect(step(scored([("1", "110/3")])) == [])
+    }
+
+    @Test mutating func batterMarksGoPast300() {
+        _ = step(scored([("1", "500/3")]), ["m1": detail([("A", 290)])])
+        #expect(step(scored([("1", "560/3")]), ["m1": detail([("A", 352)])]) == ["Batter A (England) reaches 350"])
+    }
+
+    @Test mutating func detailBackAfterAGapStartsAfresh() {
+        // Ball-by-ball stops (match stopped), then comes back with A past 100 and a new batter C.
+        _ = step(scored([("1", "100/1")]), ["m1": detail([("A", 20), ("B", 10)])])
+        #expect(step(scored([("1", "250/2")])) == ["England pass 200. Wicket: England 250/2"])
+        #expect(step(scored([("1", "250/2")]), ["m1": detail([("A", 131), ("C", 120)])]) == [])
+        #expect(step(scored([("1", "270/2")]), ["m1": detail([("A", 151), ("C", 120)])]) == ["Batter A (England) reaches 150"])
     }
 
     @Test mutating func batterFiftyAndHundred() {
@@ -107,6 +127,20 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(step(scored([("1", "100/1")]), ["m1": detail(period: 2, [("A", 60)])]) == [])
     }
 
+    @Test mutating func resultWaitsForSummary() {
+        _ = step(scored([("1", "137")]))
+        #expect(step(scored([("1", "137")], state: "post")) == [])
+        #expect(step(scored([("1", "137")], state: "post", summary: "England won by 28 runs")) == ["England won by 28 runs"])
+    }
+
+    @Test mutating func resultFiresOnceEvenIfStateFlips() {
+        // An older refresh can land after a newer one and write "in" back.
+        _ = step(scored([("1", "137")]))
+        #expect(step(scored([("1", "137")], state: "post", summary: "Won")) == ["Won"])
+        _ = step(scored([("1", "137")]))
+        #expect(step(scored([("1", "137")], state: "post", summary: "Won")) == [])
+    }
+
     @Test mutating func resultOnlyWhenSeenFinishing() {
         #expect(step(scored([("1", "137")], state: "post", summary: "Australia won by 9 wkts")) == [])
         var t = MilestoneTracker()
@@ -120,6 +154,18 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(step(scored([("1", "42/1")]), allowed: false) == [])
         // Turning alerts on later doesn't send old news.
         #expect(step(scored([("1", "42/1")])) == [])
+    }
+}
+
+@Suite struct BattingTeamFromFeed {
+    @Test func takenFromLatestBall() throws {
+        let d = buildLiveDetail(try items([ball(over: 1, runs: 1, team: "England")]), period: 1, startsMidInnings: false)
+        #expect(d?.battingTeam == "England")
+    }
+
+    @Test func blankTeamIsNil() throws {
+        let d = buildLiveDetail(try items([ball(over: 1, runs: 1, team: "")]), period: 1, startsMidInnings: false)
+        #expect(d?.battingTeam == nil)
     }
 }
 
@@ -151,6 +197,24 @@ final class RecordingNotifier: MilestoneNotifier {
         #expect(n.permissionRequests == 1)
     }
 
+    @Test func starringATeamAsksPermission() {
+        let s = ScoreStore(defaults: temp.defaults)
+        let n = RecordingNotifier()
+        s.notifier = n
+        s.toggleFavourite(TeamOption(id: "1", name: "England"))
+        #expect(n.permissionRequests == 1)
+        s.toggleFavourite(TeamOption(id: "1", name: "England"))  // unstar: no ask
+        #expect(n.permissionRequests == 1)
+        s.notifyMilestones = false
+        s.toggleFavourite(TeamOption(id: "1", name: "England"))
+        #expect(n.permissionRequests == 1)
+    }
+
+    @Test func noSystemNotificationsOutsideAnApp() {
+        // swift test runs in xctest, which has a bundle ID but isn't a .app.
+        #expect(SystemNotifier.makeIfBundled() is SilentNotifier)
+    }
+
     @Test func onlyFavouriteUnstoppedMatchesWithSettingOn() {
         let s = ScoreStore(defaults: temp.defaults)
         let fav = scored([("1", "")])
@@ -171,27 +235,37 @@ extension NetworkTests {
     @MainActor @Suite struct MilestoneRefresh {
         let temp = TempDefaults()
 
-        private func feed(_ score: String) -> String {
+        // England (favourite) v Australia, plus India v Pakistan (not a favourite).
+        private func feed(_ score: String, state: String = "in", summary: String = "") -> String {
             """
-            {"scores":[{"leagues":[{"id":"1","name":"Test"}],"events":[{"id":"m1","name":"England v Australia",
-             "competitions":[{"status":{"type":{"state":"post"}},"competitors":[
+            {"scores":[{"leagues":[{"id":"1","name":"Test"}],"events":[
+             {"id":"m1","name":"England v Australia","competitions":[{"status":{"summary":"\(summary)","type":{"state":"\(state)"}},"competitors":[
                {"score":"\(score)","team":{"id":"1","displayName":"England"}},
-               {"score":"","team":{"id":"2","displayName":"Australia"}}]}]}]}]}
+               {"score":"","team":{"id":"2","displayName":"Australia"}}]}]},
+             {"id":"m2","name":"India v Pakistan","competitions":[{"status":{"type":{"state":"\(state)"}},"competitors":[
+               {"score":"\(score)","team":{"id":"6","displayName":"India"}},
+               {"score":"","team":{"id":"7","displayName":"Pakistan"}}]}]}]}]}
             """
         }
 
-        @Test func refreshSendsAlerts() async {
+        @Test func refreshSendsAlertsForFavouritesOnly() async {
             StubURLProtocol.reset()
             let s = ScoreStore(defaults: temp.defaults)
             let n = RecordingNotifier()
             s.notifier = n
             s.favourites = ["1": "England"]
+            s.autoWatch = false  // no ball-by-ball fetches to stub
             StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("40/0"))
             await s.refresh()
             #expect(n.sent.isEmpty)
             StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("42/1"))
             await s.refresh()
-            #expect(n.sent == [MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Wicket: England 42/1")])
+            StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("42", state: "post", summary: "Australia won by 9 wkts"))
+            await s.refresh()
+            #expect(n.sent == [
+                MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Wicket: England 42/1"),
+                MilestoneAlert(matchID: "m1", title: "England v Australia", body: "England all out for 42. Australia won by 9 wkts"),
+            ])
         }
     }
 }

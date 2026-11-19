@@ -100,6 +100,7 @@ final class ScoreStore: ObservableObject {
             favourites[team.id] = nil
         } else {
             favourites[team.id] = team.name
+            if notifyMilestones { notifier.requestPermission() }
         }
     }
 
