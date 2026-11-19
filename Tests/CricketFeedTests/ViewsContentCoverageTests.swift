@@ -9,12 +9,12 @@ import Testing
 // MARK: - Helpers (local to this file)
 
 private func card(
-    _ id: String = "m1", league: String = "Big Bash", detail: String = "", state: String = "in",
+    _ id: String = "m1", title: String = "A v B", league: String = "Big Bash", detail: String = "", state: String = "in",
     stateLabel: String = "", summary: String = "", full: String = "", period: Int = 1,
     sides: [Match.Side] = [Match.Side(id: "1", name: "Team A", short: "A", score: "120/3 (15 ov)"),
                            Match.Side(id: "2", name: "Team B", short: "B", score: "")]
 ) -> Match {
-    Match(id: id, leagueID: "1", league: league, title: "A v B", detail: detail, state: state,
+    Match(id: id, leagueID: "1", league: league, title: title, detail: detail, state: state,
           stateLabel: stateLabel, summary: summary, fullDescription: full, period: period, sides: sides)
 }
 
@@ -413,11 +413,11 @@ extension UITests {
         }
 
         @Test func noSidesShowsMatchTitle() {
-            // Rendered height is the only signal here: no sides means one title line, not two team rows.
-            func height(_ m: Match) -> CGFloat {
-                host(MatchCard(match: m).frame(width: 276), size: CGSize(width: 276, height: 600)).fittingSize.height
+            // Text is unreadable off screen, so check the title wraps: a long one makes the card taller.
+            func height(title: String) -> CGFloat {
+                host(MatchCard(match: card(title: title, stateLabel: "Live", sides: [])).frame(width: 276), size: CGSize(width: 276, height: 600)).fittingSize.height
             }
-            #expect(height(card(stateLabel: "Live", sides: [])) < height(card(stateLabel: "Live")))
+            #expect(height(title: String(repeating: "Long series name ", count: 8)) > height(title: "A v B"))
         }
     }
 }
