@@ -37,9 +37,10 @@ private func liveDetail(period: Int = 1, chase: String? = nil, players: Bool = t
 // panel 300 wide, 12 padding, 24-high header -> y 24, plus at x 276, star 248, refresh 220.
 @MainActor
 private func hostPanel(_ store: ScoreStore, room: PanelRoom? = nil, sizes: Sizes,
-                       reduceMotion: Bool? = nil, height: CGFloat = 900) -> NSHostingView<some View> {
+                       reduceMotion: Bool = false, height: CGFloat = 900) -> NSHostingView<some View> {
     host(ContentView(store: store, room: room ?? PanelRoom()) { sizes.all.append($0) }
-            .environment(\.reduceMotionOverride, reduceMotion)
+            // accessibilityReduceMotion is read-only; SwiftUI's underscored twin sets it.
+            .environment(\._accessibilityReduceMotion, reduceMotion)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading),
          size: CGSize(width: 320, height: height), settle: 0.15)
 }
@@ -166,7 +167,7 @@ private func newStore(_ tmp: TempDefaults) -> ScoreStore { ScoreStore(defaults: 
         #expect(clickScan(v, from: 60, to: 300) { sizes.last != before })
     }
 
-    @Test func footerWhileFetching() {
+    @Test func headerButtonsSwitchModes() {
         let tmp = TempDefaults()
         let store = newStore(tmp)
         let sizes = Sizes()
@@ -325,6 +326,19 @@ private func newStore(_ tmp: TempDefaults) -> ScoreStore { ScoreStore(defaults: 
         #expect(heights[6] < heights[5])
     }
 
+    @Test func secondHeaderLine() {
+        // Upcoming with a date: the date gets its own line.
+        let dated = height(MatchCard(match: card(state: "pre", full: "x at Hobart, Nov 18 2026")))
+        let undated = height(MatchCard(match: card(state: "pre", full: "x at Hobart")))
+        #expect(dated > undated)
+        // With a match detail as the title, the league moves to line two.
+        let withDetail = height(MatchCard(match: card(detail: "1st Test", state: "post")))
+        let noDetail = height(MatchCard(match: card(state: "post")))
+        #expect(withDetail > noDetail)
+        // A finished game ignores the date.
+        #expect(height(MatchCard(match: card(state: "post", full: "x at Hobart, Nov 18 2026"))) == noDetail)
+    }
+
     @Test func chaseBeatsSummary() {
         let m = card(stateLabel: "Live", summary: "B won toss")
         let plain = height(MatchCard(match: m, detail: liveDetail(chase: nil, players: false, rates: false, overs: false)))
@@ -347,7 +361,7 @@ extension NetworkTests {
             "competitions":[{"competitors":[{"team":{"id":"1","displayName":"Team A"},"score":"150"}]}]}]}]}
         """
 
-        private func run(reduceMotion: Bool?) async throws {
+        private func run(reduceMotion: Bool) async throws {
             StubURLProtocol.reset()
             StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed)
             let tmp = TempDefaults()
@@ -368,7 +382,6 @@ extension NetworkTests {
             #expect(sizes.last != skeleton)
         }
 
-        @Test func refreshWithSystemSetting() async throws { try await run(reduceMotion: nil) }
         @Test func refreshWithMotion() async throws { try await run(reduceMotion: false) }
         @Test func refreshWithReduceMotion() async throws { try await run(reduceMotion: true) }
     }

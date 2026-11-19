@@ -11,9 +11,7 @@ struct ContentView: View {
     @State private var refreshing = false
     @State private var spin = 0.0
     @State private var listHeight: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @Environment(\.reduceMotionOverride) private var reduceMotionOverride
-    private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Written out so the @State defaults above run through it (and show in coverage).
     init(store: ScoreStore, room: PanelRoom, onSizeChange: @escaping (CGSize) -> Void = { _ in }) {
@@ -335,18 +333,6 @@ struct MatchCardMenu: View {
     var body: some View {
         Button("Open on Cricinfo") { openURL(match.cricinfoURL) }
         Button("Stop watching") { store.toggle(match) }
-    }
-}
-
-// The system's Reduce Motion setting can't be set from outside. Tests set this instead.
-private struct ReduceMotionOverrideKey: EnvironmentKey {
-    static let defaultValue: Bool? = nil
-}
-
-extension EnvironmentValues {
-    var reduceMotionOverride: Bool? {
-        get { self[ReduceMotionOverrideKey.self] }
-        set { self[ReduceMotionOverrideKey.self] = newValue }
     }
 }
 
