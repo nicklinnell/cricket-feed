@@ -11,6 +11,10 @@ Small macOS app. Floating window, always on top, shows live scores for the crick
 open build/CricketFeed.app
 ```
 
+Run the tests with `swift test`. They use sample data written into the tests, so they work offline.
+
+`./scripts/coverage.sh` runs them and shows how much of the app code they cover. It also writes a clickable report to `build/coverage/index.html`.
+
 ## Install
 
 ```sh
