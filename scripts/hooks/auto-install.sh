@@ -21,8 +21,19 @@ notify() {
 }
 
 worker() {
-    mkdir "$LOCK" 2>/dev/null || exit 0   # another run is busy; it re-checks main when done
-    trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+    zmodload zsh/system
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        # Another run is busy; it re-checks main when done.
+        # Unless it died (reboot, logout) and left its lock behind.
+        local pid="$(<"$LOCK/pid" 2>/dev/null)"
+        [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && exit 0
+        # No pid yet: the other run may have only just started.
+        [[ -z "$pid" && -n "$(find "$LOCK" -maxdepth 0 -mmin -1)" ]] && exit 0
+        rm -rf "$LOCK"
+        mkdir "$LOCK" 2>/dev/null || exit 0
+    fi
+    echo $sysparams[pid] > "$LOCK/pid"
+    trap 'rm -rf "$LOCK"' EXIT
     local done_file="$STATE/cricketfeed-installed-sha"
     while true; do
         local sha="$(git -C "$REPO" rev-parse main)"

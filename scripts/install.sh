@@ -49,6 +49,8 @@ else
     STAGE="$WORK/$APP_NAME"
     OLD="$WORK/old.app"
 fi
+WAS_RUNNING=0
+RELAUNCHED=0
 cleanup() {
     # If we stopped between the two moves, put the old one back.
     if [[ ! -e "$REPLACE" && ! -L "$REPLACE" ]] && [[ -e "$OLD" || -L "$OLD" ]]; then
@@ -58,6 +60,10 @@ cleanup() {
         fi
     fi
     rm -rf "$WORK"
+    # If we quit the app but then failed, reopen whatever is installed now.
+    if (( WAS_RUNNING && ! RELAUNCHED )); then
+        open "$TARGET" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
@@ -70,7 +76,6 @@ codesign --verify --strict "$WORK/$APP_NAME"
 # Quit the installed copy (only that one, not a dev build) so we can swap it.
 # Done after the build, so a failed build leaves the old app running.
 EXE="$TARGET/Contents/MacOS/CricketFeed"
-WAS_RUNNING=0
 if pkill -TERM -xf "$EXE" 2>/dev/null; then
     WAS_RUNNING=1
     for _ in {1..50}; do pgrep -xf "$EXE" >/dev/null || break; sleep 0.1; done
@@ -96,6 +101,7 @@ touch "$TARGET"
 
 echo "Installed $TARGET"
 if (( WAS_RUNNING )); then
+    RELAUNCHED=1
     open "$TARGET"
     echo "Restarted it."
 else
