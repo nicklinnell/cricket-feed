@@ -18,14 +18,6 @@ private func allSubviews(_ view: NSView) -> [NSView] {
     view.subviews + view.subviews.flatMap(allSubviews)
 }
 
-// Centre of an AppKit subview, in SwiftUI coordinates (y down) of the hosting view.
-@MainActor
-private func centre(of view: NSView, in hosting: NSView) -> CGPoint {
-    let r = view.convert(view.bounds, to: hosting)
-    let y = hosting.isFlipped ? r.midY : hosting.bounds.height - r.midY
-    return CGPoint(x: r.midX, y: y)
-}
-
 // Types into the picker's search box through the field editor, like a user would.
 @MainActor
 private func typeText(_ text: String, into hosting: NSView) {
@@ -132,26 +124,37 @@ private func picker(_ store: ScoreStore) -> NSHostingView<some View> {
         #expect(waitUntil { store.favourites == ["1": "England"] })
     }
 
-    @Test func feedTeamsAreListedAndStarrable() {
+    @Test func feedTeamsAreListedSortedAndStarrable() {
         let temp = TempDefaults()
         let store = ScoreStore(defaults: temp.defaults)
         store.matches = [feedMatch([
-            side("777", "Zeta Strikers", logo: URL(string: "https://example.com/z.png")),
-            side("778", "Alpha Kings"),
+            side("777", "Zeta Qxq", logo: URL(string: "https://example.com/z.png")),
+            side("778", "Alpha Qxq"),
             side("", "No ID Club"),
             side("779", "?"),
-            side("780", ""),
-            side("1", "England"), // already in the catalogue, not repeated
+            side("1", "England"), // already in the catalogue
         ])]
         let v = picker(store)
-        typeText("zeta", into: v)
+        // Feed teams are sorted by name, so Alpha comes first.
+        typeText("qxq", into: v)
         click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["777": "Zeta Strikers"] })
+        #expect(waitUntil { store.favourites == ["778": "Alpha Qxq"] })
         // Teams without a usable ID or name are not offered.
-        typeText("no id", into: v)
+        for search in ["no id", "?"] {
+            typeText(search, into: v)
+            click(v, at: firstRow)
+            pump(0.1)
+            #expect(store.favourites == ["778": "Alpha Qxq"])
+        }
+        // England is in the feed too but only listed once: same number of row
+        // buttons as a search with one hit.
+        func buttons() -> Int { allSubviews(v).filter { String(describing: Swift.type(of: $0)) == "KeyViewProxy" }.count }
+        typeText("zimbabwe", into: v)
+        let one = buttons()
+        typeText("england", into: v)
+        #expect(buttons() == one)
         click(v, at: firstRow)
-        pump(0.1)
-        #expect(store.favourites == ["777": "Zeta Strikers"])
+        #expect(waitUntil { store.favourites == ["778": "Alpha Qxq", "1": "England"] })
     }
 
     @Test func autoWatchSwitchFlipsAndSaves() throws {
@@ -169,8 +172,12 @@ private func picker(_ store: ScoreStore) -> NSHostingView<some View> {
         #expect(waitUntil { store.autoWatch })
     }
 
-    @Test func sectionLabelDefaults() {
-        let v = host(SectionLabel(title: "Live"), size: CGSize(width: 200, height: 40))
-        #expect(v.fittingSize.height > 0)
+    @Test func sectionLabelFirstHasLessTopSpace() {
+        func height(_ label: SectionLabel) -> CGFloat {
+            host(label, size: CGSize(width: 200, height: 40)).fittingSize.height
+        }
+        let plain = height(SectionLabel(title: "Live"))
+        #expect(plain == height(SectionLabel(title: "Live", first: false)))
+        #expect(plain - height(SectionLabel(title: "Live", first: true)) == 8)
     }
 }
