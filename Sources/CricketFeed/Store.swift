@@ -16,8 +16,27 @@ final class ScoreStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(statsOpen), forKey: Self.statsOpenKey) }
     }
 
+    // Favourite teams: ESPN team ID -> name. IDs, not names, so a renamed or
+    // differently spelled team still matches. Name is for showing in the list.
+    @Published var favourites: [String: String] {
+        didSet { UserDefaults.standard.set(favourites, forKey: Self.favouritesKey) }
+    }
+
+    // When on, favourite teams' matches go in the panel without being picked.
+    @Published var autoWatch: Bool {
+        didSet { UserDefaults.standard.set(autoWatch, forKey: Self.autoWatchKey) }
+    }
+
+    // Matches the user stopped watching. Keeps auto-watch from adding them back.
+    @Published var hidden: Set<String> {
+        didSet { UserDefaults.standard.set(Array(hidden), forKey: Self.hiddenKey) }
+    }
+
     static let watchedKey = "watchedMatchIDs"
     static let statsOpenKey = "statsOpenMatchIDs"
+    static let favouritesKey = "favouriteTeamIDs"
+    static let autoWatchKey = "autoWatchFavourites"
+    static let hiddenKey = "hiddenMatchIDs"
     let refreshSeconds: UInt64 = 10
 
     private var loop: Task<Void, Never>?
@@ -25,14 +44,52 @@ final class ScoreStore: ObservableObject {
     init() {
         watched = Set(UserDefaults.standard.stringArray(forKey: Self.watchedKey) ?? [])
         statsOpen = Set(UserDefaults.standard.stringArray(forKey: Self.statsOpenKey) ?? [])
+        favourites = UserDefaults.standard.dictionary(forKey: Self.favouritesKey) as? [String: String] ?? [:]
+        // On unless turned off. bool(forKey:) also reads "NO" passed on the command line.
+        autoWatch = UserDefaults.standard.object(forKey: Self.autoWatchKey) == nil || UserDefaults.standard.bool(forKey: Self.autoWatchKey)
+        hidden = Set(UserDefaults.standard.stringArray(forKey: Self.hiddenKey) ?? [])
     }
 
+    // Anything that could put a card on screen: picked matches or auto-watched teams.
+    var followingAnything: Bool { !watched.isEmpty || autoWatchingTeams }
+
+    var autoWatchingTeams: Bool { autoWatch && !favourites.isEmpty }
+
+    // Favourite teams' matches first; otherwise the feed's order.
     var watchedMatches: [Match] {
-        matches.filter { watched.contains($0.id) }
+        let shown = matches.filter(isWatched)
+        return shown.filter(hasFavourite) + shown.filter { !hasFavourite($0) }
+    }
+
+    // Picked by hand, or auto-watched for a favourite team. A stopped match stays
+    // stopped until it's ticked again: `hidden` always wins.
+    func isWatched(_ match: Match) -> Bool {
+        !hidden.contains(match.id) && (watched.contains(match.id) || (autoWatch && hasFavourite(match)))
+    }
+
+    // By team ID, so "England" never catches "England Women" and renames don't matter.
+    func hasFavourite(_ match: Match) -> Bool {
+        match.sides.contains { !$0.id.isEmpty && favourites[$0.id] != nil }
+    }
+
+    func toggleFavourite(_ team: TeamOption) {
+        if favourites[team.id] != nil {
+            favourites[team.id] = nil
+        } else {
+            favourites[team.id] = team.name
+        }
     }
 
     func toggle(_ match: Match) {
-        if watched.contains(match.id) { watched.remove(match.id) } else { watched.insert(match.id) }
+        if isWatched(match) {
+            watched.remove(match.id)
+            // Always remembered, so it stays gone even if a favourite is named in it later.
+            hidden.insert(match.id)
+        } else {
+            // Always a real pick, so it stays even if the team is unstarred later.
+            hidden.remove(match.id)
+            watched.insert(match.id)
+        }
     }
 
     func toggleStats(_ match: Match) {

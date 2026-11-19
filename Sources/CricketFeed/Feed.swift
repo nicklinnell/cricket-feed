@@ -50,15 +50,30 @@ struct Competitor: Decodable {
 }
 
 struct Team: Decodable {
+    let id: String?
     let displayName: String?
     let abbreviation: String?
     let logo: String?        // flag for national sides, crest for clubs
+
+    private enum CodingKeys: String, CodingKey { case id, displayName, abbreviation, logo }
+
+    // The ID comes as text today. Accept a number too, and never let an odd ID
+    // fail the whole feed.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(String.self, forKey: .id))
+            ?? (try? c.decodeIfPresent(Int.self, forKey: .id)).flatMap { $0.map(String.init) }
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        abbreviation = try c.decodeIfPresent(String.self, forKey: .abbreviation)
+        logo = try c.decodeIfPresent(String.self, forKey: .logo)
+    }
 }
 
 // MARK: - What the UI shows
 
 struct Match: Identifiable, Hashable {
     struct Side: Hashable {
+        var id: String = ""      // ESPN team ID, same in every competition
         let name: String
         let short: String
         let score: String
@@ -112,6 +127,7 @@ func fetchMatches() async throws -> [Match] {
             let status = comp?.status ?? event.status
             let sides = (comp?.competitors ?? []).map { c in
                 Match.Side(
+                    id: c.team?.id ?? "",
                     name: c.team?.displayName ?? "?",
                     short: c.team?.abbreviation ?? "?",
                     score: c.score ?? "",
