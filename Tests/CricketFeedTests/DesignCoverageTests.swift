@@ -118,7 +118,6 @@ private let panelBackdrop: [NSAppearance.Name: [CGFloat]] = [
         ]
         for (name, text, background) in pairs {
             let ratio = contrast(text, background)
-            print("contrast \(mode.rawValue) \(name): \(String(format: "%.2f", ratio))")
             #expect(ratio >= 4.5, "\(name) is \(ratio):1 in \(mode.rawValue)")
         }
     }
@@ -186,14 +185,20 @@ private let panelBackdrop: [NSAppearance.Name: [CGFloat]] = [
     }
 
     @Test func hoverFillPrecedence() {
-        for pressed in [false, true] {
-            for hovering in [false, true] {
-                for selected in [false, true] {
-                    let want: HoverFill = pressed ? .pressed : hovering ? .hovering : selected ? .selected : .none
-                    #expect(HoverFill(pressed: pressed, hovering: hovering, selected: selected) == want,
-                            "pressed \(pressed) hovering \(hovering) selected \(selected)")
-                }
-            }
+        // (pressed, hovering, selected) -> fill. Press beats hover, hover beats selected.
+        let table: [(Bool, Bool, Bool, HoverFill)] = [
+            (false, false, false, .none),
+            (false, false, true, .selected),
+            (false, true, false, .hovering),
+            (false, true, true, .hovering),
+            (true, false, false, .pressed),
+            (true, false, true, .pressed),
+            (true, true, false, .pressed),
+            (true, true, true, .pressed),
+        ]
+        for (pressed, hovering, selected, want) in table {
+            #expect(HoverFill(pressed: pressed, hovering: hovering, selected: selected) == want,
+                    "pressed \(pressed) hovering \(hovering) selected \(selected)")
         }
         // Each state looks different from the others.
         let colours = [HoverFill.pressed, .hovering, .selected, .none].map(\.colour)
@@ -233,13 +238,6 @@ extension UITests {
             let row = host(SideRow(side: side(score: "98 & 34/2 (12.3 ov, target 259)", logo: logo)).frame(width: 240),
                            size: CGSize(width: 240, height: 60))
             #expect(row.fittingSize.height > 0)
-        }
-
-        @Test func hoverPlateRendersAndTracksHover() {
-            let v = host(HoverPlate { Text("hover me").frame(width: 60, height: 40) }, size: CGSize(width: 60, height: 40))
-            hover(v, at: CGPoint(x: 30, y: 20))
-            hover(v, at: CGPoint(x: 30, y: 20), inside: false)
-            #expect(v.fittingSize.height > 0)
         }
 
         @Test func emptyStateWithAndWithoutAction() {

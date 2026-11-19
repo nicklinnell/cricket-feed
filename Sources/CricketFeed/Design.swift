@@ -328,9 +328,9 @@ struct PillButtonStyle: ButtonStyle {
 
 // Rounded highlight that appears on hover and deepens on press.
 struct HoverPlate<Content: View>: View {
-    var pressed = false
+    let pressed: Bool
     var selected = false
-    var radius: CGFloat = 8
+    let radius: CGFloat
     @ViewBuilder var content: Content
     @State private var hovering = false
 
