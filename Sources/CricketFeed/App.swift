@@ -109,12 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @main
 struct Main {
-    // Tests swap this to launch with a throwaway store.
-    @MainActor static var makeDelegate: () -> AppDelegate = { AppDelegate() }
-
-    @MainActor static func main() {
+    static func main() {
         let app = NSApplication.shared
-        let delegate = makeDelegate()
+        let delegate = AppDelegate()
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()

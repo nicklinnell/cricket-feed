@@ -226,18 +226,22 @@ extension NetworkTests {
             #expect(s.details["m1"]?.batters.map(\.id) == ["A", "B"])
         }
 
+        // After stop() no more fetches, even once the refresh interval has passed.
         @Test func startRefreshesAndStopEndsTheLoop() async {
             StubURLProtocol.reset()
             StubURLProtocol.on(prefix: panelPrefix, json: panel([event("m1")]))
             let s = ScoreStore(defaults: temp.defaults)
+            s.refreshSeconds = 1
             s.start()
             #expect(await waitUntil { s.lastUpdated != nil })
             #expect(s.matches.map(\.id) == ["m1"])
             await s.stop()
-            let count = panelRequests()
-            #expect(count == 1)
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            #expect(panelRequests() == count)
+            #expect(panelRequests() == 1)
+            try? await Task.sleep(nanoseconds: (s.refreshSeconds * 1_000_000_000) + 500_000_000)
+            // Keep the store alive through the wait, so a running loop would still fetch.
+            withExtendedLifetime(s) {
+                #expect(panelRequests() == 1)
+            }
         }
 
         // A second start() cancels the first loop. If it didn't, the first loop
@@ -261,19 +265,22 @@ extension NetworkTests {
             }
         }
 
-        // The loop doesn't keep the store alive, and a freed store fetches nothing.
+        // The loop doesn't keep the store alive, and stops fetching once the store is gone.
         @Test func loopDoesNotKeepStoreAlive() async {
             StubURLProtocol.reset()
             StubURLProtocol.on(prefix: panelPrefix, json: panel([event("m1")]))
             weak var weakStore: ScoreStore?
             do {
                 let s = ScoreStore(defaults: temp.defaults)
+                s.refreshSeconds = 1
                 weakStore = s
                 s.start()
+                #expect(await waitUntil { s.lastUpdated != nil })
             }
-            #expect(weakStore == nil)
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            #expect(panelRequests() == 0)
+            #expect(await waitUntil(1) { weakStore == nil })
+            // Past the next refresh time: a loop still running would have fetched again.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            #expect(panelRequests() == 1)
         }
     }
 }

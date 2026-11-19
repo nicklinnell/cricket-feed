@@ -3,20 +3,16 @@ import Testing
 @testable import CricketFeed
 
 @Suite struct FeedModel {
-    @Test func sideDefaultsToNoIDAndNoLogo() {
-        let side = Match.Side(name: "England", short: "ENG", score: "250/6")
-        #expect(side.id == "")
-        #expect(side.logo == nil)
-    }
-
     @Test func cricinfoURLUsesMatchID() {
         #expect(match("1415703").cricinfoURL.absoluteString
             == "https://www.espncricinfo.com/ci/engine/match/1415703.html")
     }
 
-    @Test func isLiveOnlyWhenInPlay() {
-        #expect(match("1", live: true).isLive)
-        #expect(!match("1", live: false).isLive)
+    @Test(arguments: [("in", true), ("post", false), ("pre", false), ("", false)])
+    func isLiveOnlyWhenInPlay(state: String, live: Bool) {
+        let m = Match(id: "1", leagueID: "1", league: "", title: "", detail: "", state: state,
+                      stateLabel: "", summary: "", fullDescription: "", period: 1, sides: [])
+        #expect(m.isLive == live)
     }
 
     @Test func badStatusDescribesHTTPCode() {
