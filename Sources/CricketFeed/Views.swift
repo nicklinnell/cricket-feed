@@ -6,12 +6,21 @@ struct ContentView: View {
 
     @ObservedObject var store: ScoreStore
     @ObservedObject var room: PanelRoom
-    var onSizeChange: (CGSize) -> Void = { _ in }
+    var onSizeChange: (CGSize) -> Void
     @State private var mode = Mode.scores
     @State private var refreshing = false
     @State private var spin = 0.0
     @State private var listHeight: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.reduceMotionOverride) private var reduceMotionOverride
+    private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
+
+    // Written out so the @State defaults above run through it (and show in coverage).
+    init(store: ScoreStore, room: PanelRoom, onSizeChange: @escaping (CGSize) -> Void = { _ in }) {
+        self.store = store
+        self.room = room
+        self.onSizeChange = onSizeChange
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -127,10 +136,7 @@ struct ContentView: View {
                         MatchCard(match: match, detail: store.details[match.id],
                                   statsOpen: store.statsOpen.contains(match.id),
                                   toggleStats: { store.toggleStats(match) })
-                            .contextMenu {
-                                Button("Open on Cricinfo") { NSWorkspace.shared.open(match.cricinfoURL) }
-                                Button("Stop watching") { store.toggle(match) }
-                            }
+                            .contextMenu { MatchCardMenu(match: match, store: store) }
                     }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
@@ -316,6 +322,31 @@ struct MatchCard: View {
         guard phase == .live || (phase == .paused && !match.stateLabel.localizedCaseInsensitiveContains("innings")) else { return nil }
         let withOvers = match.sides.filter { !ScoreParts($0.score).detail.isEmpty }
         return withOvers.count == 1 ? withOvers[0] : nil
+    }
+}
+
+// Right-click menu on a card. Own view so tests can host it and click its buttons.
+// Opens links through the environment's openURL (the default browser), which tests replace.
+struct MatchCardMenu: View {
+    let match: Match
+    @ObservedObject var store: ScoreStore
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button("Open on Cricinfo") { openURL(match.cricinfoURL) }
+        Button("Stop watching") { store.toggle(match) }
+    }
+}
+
+// The system's Reduce Motion setting can't be set from outside. Tests set this instead.
+private struct ReduceMotionOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+extension EnvironmentValues {
+    var reduceMotionOverride: Bool? {
+        get { self[ReduceMotionOverrideKey.self] }
+        set { self[ReduceMotionOverrideKey.self] = newValue }
     }
 }
 
