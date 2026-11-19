@@ -248,7 +248,10 @@ extension UITests {
         @Test func statsToggleOnACard() {
             let tmp = TempDefaults()
             let store = newStore(tmp)
-            store.matches = [card(stateLabel: "Live", summary: "A chose to bat"), card("m2", state: "post", summary: "A won by 3 runs")]
+            // Real cards: a match detail as the title, the league on line two.
+            store.matches = [card(detail: "1st T20", stateLabel: "Live", summary: "A chose to bat",
+                                  full: "1st T20 (N), Big Bash at Perth, Nov 18 2026"),
+                             card("m2", state: "post", summary: "A won by 3 runs")]
             store.watched = ["m1", "m2"]
             store.details = ["m1": liveDetail()]
             store.lastUpdated = Date()
