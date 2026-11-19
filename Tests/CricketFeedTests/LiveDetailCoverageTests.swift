@@ -156,7 +156,7 @@ extension NetworkTests {
 
     @Test func truncatesNotRounds() {
         #expect(truncated2(1.999) == "1.99")
-        #expect(truncated2(0.3) == "0.30")  // 0.3 * 100 is 29.999..., the nudge keeps it at 0.30
+        #expect(truncated2(0.29) == "0.29")  // 0.29 * 100 is 28.999..., the nudge keeps it at 0.29
         #expect(truncated2(0) == "0.00")
     }
 
