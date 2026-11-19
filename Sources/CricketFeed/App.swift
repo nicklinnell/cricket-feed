@@ -27,15 +27,26 @@ final class FloatingPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let store: ScoreStore
     let room = PanelRoom()
+    let loginItem: LoginItem
     var panel: FloatingPanel!
     var statusItem: NSStatusItem!
+    var loginMenuItem: NSMenuItem!
+    // Tests swap this so no alert blocks them.
+    var showError: (String) -> Void = { message in
+        let alert = NSAlert()
+        alert.messageText = "Couldn't change Open at Login"
+        alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
 
-    // Tests pass a store on a throwaway defaults suite.
-    init(store: ScoreStore? = nil) {
+    // Tests pass a store on a throwaway defaults suite and a fake login item.
+    init(store: ScoreStore? = nil, loginItem: LoginItem? = nil) {
         self.store = store ?? ScoreStore()
+        self.loginItem = loginItem ?? SystemLoginItem.makeIfBundled()
         super.init()
     }
 
@@ -71,9 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image?.isTemplate = true
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show / Hide Scores", action: #selector(togglePanel), keyEquivalent: "s"))
+        loginMenuItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
+        menu.addItem(loginMenuItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.delegate = self
         statusItem.menu = menu
+        updateLoginMenuItem()
 
         store.start()
     }
@@ -102,6 +117,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let image = NSImage(systemSymbolName: name, accessibilityDescription: "Cricket") { return image }
         }
         return nil
+    }
+
+    // Re-read each time, as the user can change it in System Settings.
+    func menuNeedsUpdate(_ menu: NSMenu) { updateLoginMenuItem() }
+
+    func updateLoginMenuItem() {
+        switch loginItem.state {
+        case .on: loginMenuItem.state = .on
+        case .off: loginMenuItem.state = .off
+        case .needsApproval: loginMenuItem.state = .mixed
+        }
+        loginMenuItem.toolTip = loginItem.state == .needsApproval
+            ? "Allow Cricket Feed in System Settings > General > Login Items"
+            : nil
+    }
+
+    @objc func toggleLoginItem() {
+        do {
+            try loginItem.set(loginItem.state == .off)
+            // macOS can hold it until the user allows it, so take them there.
+            if loginItem.state == .needsApproval { loginItem.openSettings() }
+        } catch {
+            showError(error.localizedDescription)
+        }
+        updateLoginMenuItem()
     }
 
     @objc func togglePanel() {
