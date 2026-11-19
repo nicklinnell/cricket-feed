@@ -34,19 +34,6 @@ private func png(width: Int, height: Int, opaque: (x: Int, y: Int, w: Int, h: In
     return rep.representation(using: .png, properties: [:])!
 }
 
-// Synthetic mouseMoved doesn't reach SwiftUI's hover tracking, but a mouseEntered
-// sent straight to the hosting view (the tracking area owner), tagged with its
-// tracking area's number, does.
-@MainActor
-private func enter(_ hosting: NSView, at point: CGPoint) {
-    let loc = hosting.convert(NSPoint(x: point.x, y: hosting.isFlipped ? point.y : hosting.bounds.height - point.y), to: nil)
-    let e = NSEvent.enterExitEvent(with: .mouseEntered, location: loc, modifierFlags: [],
-                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: hosting.window!.windowNumber,
-                                   context: nil, eventNumber: 0, trackingNumber: hosting.trackingAreas.first!.hash, userData: nil)!
-    hosting.mouseEntered(with: e)
-    pump(0.3)
-}
-
 // Alpha of the rendered pixel at a point (SwiftUI coords).
 @MainActor
 private func alpha(_ hosting: NSView, at point: CGPoint) -> CGFloat {
@@ -190,7 +177,7 @@ private func phaseMatch(state: String, label: String) -> Match {
     @Test func hoverPlateFillsOnHover() {
         let v = host(HoverPlate { Color.clear.frame(width: 60, height: 40) }, size: CGSize(width: 60, height: 40))
         #expect(alpha(v, at: CGPoint(x: 30, y: 20)) == 0)
-        enter(v, at: CGPoint(x: 30, y: 20))
+        hover(v, at: CGPoint(x: 30, y: 20))
         let hovered = alpha(v, at: CGPoint(x: 30, y: 20))
         #expect(hovered > 0)
         // Press deepens the plate beyond hover.

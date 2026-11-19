@@ -115,16 +115,16 @@ func click(_ hosting: NSView, at point: CGPoint, right: Bool = false, settle: Ti
     }
 }
 
-// Moves the mouse over a point in the hosted view (SwiftUI coordinates), for hover effects.
+// Moves the pointer into (or out of) the hosted view, for SwiftUI `onHover`.
+// Synthetic mouseMoved events don't reach SwiftUI's hover tracking, but
+// enter/exit events sent straight to the hosting view (which owns the tracking area) do.
 @MainActor
-func hover(_ hosting: NSView, at point: CGPoint, settle: TimeInterval = 0.05) {
-    let window = hosting.window!
-    window.acceptsMouseMovedEvents = true
-    let inWindow = hosting.convert(NSPoint(x: point.x, y: hosting.isFlipped ? point.y : hosting.bounds.height - point.y), to: nil)
-    let e = NSEvent.mouseEvent(with: .mouseMoved, location: inWindow, modifierFlags: [],
-                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                               context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
-    NSApp.sendEvent(e)
+func hover(_ hosting: NSView, at point: CGPoint, inside: Bool = true, settle: TimeInterval = 0.3) {
+    let loc = hosting.convert(NSPoint(x: point.x, y: hosting.isFlipped ? point.y : hosting.bounds.height - point.y), to: nil)
+    let e = NSEvent.enterExitEvent(with: inside ? .mouseEntered : .mouseExited, location: loc, modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: hosting.window!.windowNumber,
+                                   context: nil, eventNumber: 0, trackingNumber: hosting.trackingAreas.first!.hash, userData: nil)!
+    if inside { hosting.mouseEntered(with: e) } else { hosting.mouseExited(with: e) }
     pump(settle)
 }
 

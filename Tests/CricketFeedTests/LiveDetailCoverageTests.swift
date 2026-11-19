@@ -43,7 +43,7 @@ extension NetworkTests {
             #expect(pagesAsked == [1])
             #expect(d?.overs.map(\.number) == [1])
             #expect(d?.period == 1)
-            let url = try #require(StubURLProtocol.requests.first)
+            let url = try #require(StubURLProtocol.requests.first { $0.absoluteString.hasPrefix(base) })
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             #expect(q.contains(URLQueryItem(name: "event", value: "42")))
             #expect(q.contains(URLQueryItem(name: "period", value: "1")))

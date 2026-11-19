@@ -73,7 +73,8 @@ extension NetworkTests {
             let matches = try await fetchMatches()
             #expect(matches.map(\.id) == ["9"])
             #expect(matches[0].league == "Big Bash")
-            #expect(StubURLProtocol.requests == [scorePanelURL])
+            // Ignore team logos other tests may load at the same time.
+            #expect(StubURLProtocol.requests.filter { $0.host != "a.espncdn.com" } == [scorePanelURL])
         }
 
         @Test func nonOKResponseThrowsBadStatus() async throws {
