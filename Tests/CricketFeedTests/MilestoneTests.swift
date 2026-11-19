@@ -174,16 +174,24 @@ private func detail(period: Int = 1, _ batters: [(String, Int)]) -> LiveDetail {
         #expect(d?.battingTeam == "England")
     }
 
-    @Test func outBattersKeepTheirBestTotal() throws {
-        // A on 52 is out on the last ball; the panel rows drop A, the milestone list keeps them.
+    @Test func outBattersKeepTheirLatestTotal() throws {
+        // A goes 48 -> 52 and is out on the last ball; the panel rows drop A, the milestone list keeps them.
         let balls = try items([
-            ball(over: 1, runs: 1, striker: "A", nonStriker: "B"),
-            ball(over: 1, runs: 0, out: "A", striker: "A", nonStriker: "B"),
+            ball(over: 1, runs: 1, striker: "A", nonStriker: "B", strikerRuns: 48),
+            ball(over: 1, runs: 4, out: "A", striker: "A", nonStriker: "B", strikerRuns: 52),
         ])
         let d = buildLiveDetail(balls, period: 1, startsMidInnings: false)
         #expect(d?.batters.map(\.id) == ["B"])
         #expect(d?.inningsBatters.map(\.id) == ["A", "B"])
-        #expect(d?.inningsBatters.first?.runs == 10)
+        #expect(d?.inningsBatters.first?.runs == 52)
+    }
+
+    @Test func correctionDownwardsWins() throws {
+        let balls = try items([
+            ball(over: 1, runs: 1, strikerRuns: 50),
+            ball(over: 1, runs: 0, strikerRuns: 49),
+        ])
+        #expect(buildLiveDetail(balls, period: 1, startsMidInnings: false)?.inningsBatters.first?.runs == 49)
     }
 
     @Test func blankTeamIsNil() throws {
@@ -307,8 +315,11 @@ extension NetworkTests {
             StubURLProtocol.on(prefix: scorePanelURL.absoluteString, json: feed("100/1"))
             StubURLProtocol.on(prefix: pbpPrefix, json: pbp(48))
             await s.refresh()
-            StubURLProtocol.on(prefix: pbpPrefix, json: pbp(52))
+            // A reaches 52 and is out on that ball.
+            let out = ball(over: 1, runs: 4, out: "A", strikerRuns: 52)
+            StubURLProtocol.on(prefix: pbpPrefix, json: #"{"commentary":{"pageCount":1,"items":["# + out + "]}}")
             await s.refresh()
+            #expect(s.details["m1"]?.batters.map(\.id) == ["B"])
             #expect(n.sent == [MilestoneAlert(matchID: "m1", title: "England v Australia", body: "Batter A (England) reaches 50")])
         }
 

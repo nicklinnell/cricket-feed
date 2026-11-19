@@ -113,7 +113,7 @@ struct LiveDetail: Hashable {
     var bowlers: [BowlerLine] = []
     var period = 0            // innings these figures belong to
     var battingTeam: String?  // for "Root (England) reaches 100"
-    // Every batter in the fetched balls with their best total, out ones too,
+    // Every batter in the fetched balls with their latest total, out ones too,
     // so a 50 just before a wicket still counts. Milestone alerts only.
     var inningsBatters: [BatterLine] = []
 
@@ -223,7 +223,8 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     return (batters, bowlers)
 }
 
-// Each batter named in the items, first-seen order, with their highest total.
+// Each batter named in the items, first-seen order, with their latest total
+// (so a scoring correction downwards wins).
 func inningsBatters(_ items: [PBPItem]) -> [BatterLine] {
     var out: [BatterLine] = []
     for item in items {
@@ -231,7 +232,7 @@ func inningsBatters(_ items: [PBPItem]) -> [BatterLine] {
             guard let a = b?.athlete, let id = a.id, let name = a.displayName, !name.isEmpty else { continue }
             let line = BatterLine(id: id, name: name, runs: b?.totalRuns ?? 0, balls: b?.faced ?? 0, fours: 0, sixes: 0)
             if let i = out.firstIndex(where: { $0.id == id }) {
-                if line.runs >= out[i].runs { out[i] = line }
+                out[i] = line
             } else {
                 out.append(line)
             }
