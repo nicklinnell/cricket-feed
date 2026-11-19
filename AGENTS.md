@@ -24,6 +24,8 @@ macOS menu bar app (SwiftUI + AppKit, Swift package, macOS 14+). Floating panel 
 
 User choices live in `UserDefaults` via `ScoreStore` (`Store.swift`). Keep existing keys stable so upgrades keep users' picks, favourites and hidden matches.
 
+Open at Login is the exception: macOS keeps it (`LoginItem.swift`), so don't copy it into `UserDefaults`.
+
 ## Docs
 
 Update `README.md` when user-facing behaviour or scripts change. Write in plain British English.

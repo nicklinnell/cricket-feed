@@ -75,7 +75,8 @@ extension NetworkTests {
             let menu = try #require(item.menu)
             #expect(menu.items.map(\.title) == ["Show / Hide Scores", "Open at Login", "", "Quit"])
             #expect(menu.items[0].action == #selector(AppDelegate.togglePanel))
-            #expect(menu.items[1].action == #selector(AppDelegate.toggleLoginItem))
+            // swift test isn't the installed app, so the item is greyed out.
+            #expect(menu.items[1].action == nil)
             #expect(menu.items[1].state == .off)
             #expect(menu.items[2].isSeparatorItem)
             #expect(menu.items[3].action == #selector(NSApplication.terminate(_:)))

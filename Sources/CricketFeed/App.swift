@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Tests pass a store on a throwaway defaults suite and a fake login item.
     init(store: ScoreStore? = nil, loginItem: LoginItem? = nil) {
         self.store = store ?? ScoreStore()
-        self.loginItem = loginItem ?? SystemLoginItem.makeIfBundled()
+        self.loginItem = loginItem ?? SystemLoginItem.make()
         super.init()
     }
 
@@ -123,23 +123,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) { updateLoginMenuItem() }
 
     func updateLoginMenuItem() {
-        switch loginItem.state {
+        guard loginItem.available else {
+            loginMenuItem.action = nil  // greyed out
+            loginMenuItem.state = .off
+            loginMenuItem.toolTip = "Only for the copy in Applications"
+            return
+        }
+        let state = loginItem.state
+        switch state {
         case .on: loginMenuItem.state = .on
         case .off: loginMenuItem.state = .off
         case .needsApproval: loginMenuItem.state = .mixed
         }
-        loginMenuItem.toolTip = loginItem.state == .needsApproval
+        loginMenuItem.toolTip = state == .needsApproval
             ? "Allow Cricket Feed in System Settings > General > Login Items"
             : nil
     }
 
     @objc func toggleLoginItem() {
-        do {
-            try loginItem.set(loginItem.state == .off)
-            // macOS can hold it until the user allows it, so take them there.
-            if loginItem.state == .needsApproval { loginItem.openSettings() }
-        } catch {
-            showError(error.localizedDescription)
+        switch loginItem.state {
+        case .on:
+            do { try loginItem.set(false) } catch { showError(error.localizedDescription) }
+        case .needsApproval:
+            // Waiting on the user, so take them to where they allow it.
+            loginItem.openSettings()
+        case .off:
+            do {
+                try loginItem.set(true)
+                // macOS can hold it until the user allows it, and may not say so straight away.
+                if loginItem.state != .on { loginItem.openSettings() }
+            } catch {
+                // macOS can also throw when the user has to allow it first.
+                if loginItem.state == .needsApproval { loginItem.openSettings() } else { showError(error.localizedDescription) }
+            }
         }
         updateLoginMenuItem()
     }

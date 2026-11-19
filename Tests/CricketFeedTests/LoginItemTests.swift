@@ -1,20 +1,27 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import Testing
 @testable import CricketFeed
 
 // Records what the app asks of the login item, standing in for macOS.
 final class FakeLoginItem: LoginItem {
+    var available = true
     var state: LoginItemState = .off
     // What turning it on leaves it as: on, or waiting for the user to allow it.
     var stateWhenOn: LoginItemState = .on
     var failure: Error?
+    // What a failed call leaves it as.
+    var stateOnFailure: LoginItemState?
     var sets: [Bool] = []
     var settingsOpened = 0
 
     func set(_ on: Bool) throws {
         sets.append(on)
-        if let failure { throw failure }
+        if let failure {
+            if let stateOnFailure { state = stateOnFailure }
+            throw failure
+        }
         state = on ? stateWhenOn : .off
     }
 
@@ -27,10 +34,12 @@ struct LoginItemFailure: LocalizedError {
 
 @MainActor @Suite struct LoginItemMenu {
     let fake = FakeLoginItem()
+    let temp = TempDefaults()
+
     // Just the menu bits; no panel or refresh loop.
     func makeDelegate() -> (AppDelegate, () -> [String]) {
-        let d = AppDelegate(store: ScoreStore(defaults: TempDefaults().defaults), loginItem: fake)
-        d.loginMenuItem = NSMenuItem(title: "Open at Login", action: nil, keyEquivalent: "")
+        let d = AppDelegate(store: ScoreStore(defaults: temp.defaults), loginItem: fake)
+        d.loginMenuItem = NSMenuItem(title: "Open at Login", action: #selector(AppDelegate.toggleLoginItem), keyEquivalent: "")
         var errors: [String] = []
         d.showError = { errors.append($0) }
         return (d, { errors })
@@ -41,6 +50,7 @@ struct LoginItemFailure: LocalizedError {
         d.updateLoginMenuItem()
         #expect(d.loginMenuItem.state == .off)
         #expect(d.loginMenuItem.toolTip == nil)
+        #expect(d.loginMenuItem.action == #selector(AppDelegate.toggleLoginItem))
 
         // Changed in System Settings while the app ran: re-read when the menu opens.
         fake.state = .on
@@ -51,6 +61,16 @@ struct LoginItemFailure: LocalizedError {
         d.menuNeedsUpdate(NSMenu())
         #expect(d.loginMenuItem.state == .mixed)
         #expect(d.loginMenuItem.toolTip?.contains("Login Items") == true)
+    }
+
+    // A dev build can't be a login item: greyed out, so a click can't register it.
+    @Test func greyedOutWhenNotInstalled() {
+        let (d, _) = makeDelegate()
+        fake.available = false
+        d.updateLoginMenuItem()
+        #expect(d.loginMenuItem.action == nil)
+        #expect(d.loginMenuItem.state == .off)
+        #expect(d.loginMenuItem.toolTip == "Only for the copy in Applications")
     }
 
     @Test func clickTurnsItOnThenOff() {
@@ -68,16 +88,37 @@ struct LoginItemFailure: LocalizedError {
 
     // macOS can hold a new login item until the user allows it.
     @Test func waitingForApprovalOpensSettings() {
-        let (d, _) = makeDelegate()
+        let (d, errors) = makeDelegate()
         fake.stateWhenOn = .needsApproval
         d.toggleLoginItem()
         #expect(fake.settingsOpened == 1)
         #expect(d.loginMenuItem.state == .mixed)
 
-        // Clicking again while it waits turns it off.
+        // Clicking the dash takes them to Settings again and keeps the request.
         d.toggleLoginItem()
-        #expect(fake.sets == [true, false])
-        #expect(d.loginMenuItem.state == .off)
+        #expect(fake.sets == [true])
+        #expect(fake.settingsOpened == 2)
+        #expect(d.loginMenuItem.state == .mixed)
+        #expect(errors().isEmpty)
+    }
+
+    // macOS may not have caught up when register() returns: still send them to Settings.
+    @Test func notOnYetOpensSettings() {
+        let (d, _) = makeDelegate()
+        fake.stateWhenOn = .off
+        d.toggleLoginItem()
+        #expect(fake.settingsOpened == 1)
+    }
+
+    // register() can throw when the user has to allow it first. That's not an error to show.
+    @Test func throwWhileNeedingApprovalOpensSettings() {
+        let (d, errors) = makeDelegate()
+        fake.failure = LoginItemFailure()
+        fake.stateOnFailure = .needsApproval
+        d.toggleLoginItem()
+        #expect(errors().isEmpty)
+        #expect(fake.settingsOpened == 1)
+        #expect(d.loginMenuItem.state == .mixed)
     }
 
     @Test func failureShowsErrorAndLeavesTickAlone() {
@@ -85,18 +126,40 @@ struct LoginItemFailure: LocalizedError {
         fake.failure = LoginItemFailure()
         d.toggleLoginItem()
         #expect(errors() == ["Not allowed"])
+        #expect(fake.settingsOpened == 0)
         #expect(d.loginMenuItem.state == .off)
+
+        // Same when turning it off fails.
+        fake.state = .on
+        d.toggleLoginItem()
+        #expect(fake.sets == [true, false])
+        #expect(errors() == ["Not allowed", "Not allowed"])
+        #expect(d.loginMenuItem.state == .on)
     }
 
-    // swift test has no app bundle, so it must never touch the real login items.
-    @Test func bareProcessGetsNoLoginItem() throws {
-        #expect(SystemLoginItem.makeIfBundled() is NoLoginItem)
+    @Test func macOSStatusMapsToState() {
+        #expect(LoginItemState(.enabled) == .on)
+        #expect(LoginItemState(.requiresApproval) == .needsApproval)
+        #expect(LoginItemState(.notRegistered) == .off)
+        #expect(LoginItemState(.notFound) == .off)
+    }
+
+    // Only the copy in an Applications folder; never a build folder or swift test.
+    @Test func onlyTheInstalledAppIsALoginItem() throws {
+        let home = URL(fileURLWithPath: "/Users/someone")
+        let installed = { SystemLoginItem.isInstalled(URL(fileURLWithPath: $0), home: home) }
+        #expect(installed("/Applications/CricketFeed.app"))
+        #expect(installed("/Users/someone/Applications/CricketFeed.app"))
+        #expect(!installed("/Users/someone/repo/build/CricketFeed.app"))
+        #expect(!installed("/Applications/Tools/CricketFeed.app"))
+        #expect(!installed("/Applications/CricketFeed"))
+        #expect(!installed("/Users/other/Applications/CricketFeed.app"))
+
+        #expect(SystemLoginItem.make() is NoLoginItem)
         let none = NoLoginItem()
-        #expect(none.state == .off)
+        #expect(!none.available)
         try none.set(true)
         none.openSettings()
         #expect(none.state == .off)
-        let app = try #require(Bundle(path: "/System/Applications/Calculator.app"))
-        #expect(SystemLoginItem.makeIfBundled(app) is SystemLoginItem)
     }
 }
