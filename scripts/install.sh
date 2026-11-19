@@ -52,6 +52,16 @@ trap 'exit 130' INT TERM HUP
 ditto "build/$APP_NAME" "$STAGE"
 codesign --verify --strict "$STAGE"
 
+# Quit the installed copy (only that one, not a dev build) so we can swap it.
+# Done after the build, so a failed build leaves the old app running.
+EXE="$TARGET/Contents/MacOS/CricketFeed"
+WAS_RUNNING=0
+if pkill -TERM -xf "$EXE" 2>/dev/null; then
+    WAS_RUNNING=1
+    for _ in {1..50}; do pgrep -xf "$EXE" >/dev/null || break; sleep 0.1; done
+    pkill -KILL -xf "$EXE" 2>/dev/null || true
+fi
+
 if [[ -e "$TARGET" || -L "$TARGET" ]]; then
     mv "$TARGET" "$OLD"
 fi
@@ -68,5 +78,9 @@ fi
 touch "$TARGET"
 
 echo "Installed $TARGET"
-echo "Open it with: open \"$TARGET\""
-echo "If an older copy is running, quit it from the menu bar icon first, then reopen."
+if (( WAS_RUNNING )); then
+    open "$TARGET"
+    echo "Restarted it."
+else
+    echo "Open it with: open \"$TARGET\""
+fi

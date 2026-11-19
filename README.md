@@ -17,7 +17,17 @@ open build/CricketFeed.app
 ./scripts/install.sh
 ```
 
-Builds the app and copies it into `/Applications`. Run it again to update. If the app is running, quit it from the menu bar icon first, then reopen it.
+Builds the app and copies it into `/Applications`. Run it again to update. If the app is running, it gets restarted on the new version.
+
+### Auto-update
+
+```sh
+./scripts/setup-auto-update.sh
+```
+
+One-time setup. After that, every merge or commit on `main` rebuilds and reinstalls the app in the background, then restarts it if it was open. You get a notification when it's done or if it fails. Log: `~/Library/Logs/CricketFeed-install.log`.
+
+This adds `post-merge` and `post-commit` hooks to the repo's shared git hooks folder, so it covers every worktree. It only acts on `main`. Turn it off with `./scripts/setup-auto-update.sh --off`.
 
 The icon is `assets/icon-1024.png`. The build turns it into `AppIcon.icns`.
 
