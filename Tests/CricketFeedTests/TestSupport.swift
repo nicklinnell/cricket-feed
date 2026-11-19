@@ -84,6 +84,8 @@ final class StubURLProtocol: URLProtocol {
 @discardableResult
 func host<V: View>(_ view: V, size: CGSize = CGSize(width: 320, height: 600), settle: TimeInterval = 0.05) -> NSHostingView<V> {
     _ = NSApplication.shared
+    // Views load team logos; make sure those hit the stub, never ESPN.
+    _ = StubURLProtocol.installed
     let hosting = NSHostingView(rootView: view)
     hosting.frame = NSRect(origin: .zero, size: size)
     let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: size.width, height: size.height),

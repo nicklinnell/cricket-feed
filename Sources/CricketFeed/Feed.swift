@@ -15,16 +15,44 @@ struct LeagueBlock: Decodable {
 }
 
 struct League: Decodable {
-    let id: String
+    let id: String?
     let name: String?
+
+    private enum CodingKeys: String, CodingKey { case id, name }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleID(.id)
+        name = try? c.decodeIfPresent(String.self, forKey: .name)
+    }
 }
 
 struct Event: Decodable {
-    let id: String
+    let id: String?          // events without one are skipped: they can't be picked
     let name: String?
     let description: String?
     let status: Status?
     let competitions: [Competition]?
+
+    private enum CodingKeys: String, CodingKey { case id, name, description, status, competitions }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleID(.id)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        status = try c.decodeIfPresent(Status.self, forKey: .status)
+        competitions = try c.decodeIfPresent([Competition].self, forKey: .competitions)
+    }
+}
+
+extension KeyedDecodingContainer {
+    // ESPN IDs come as text today. Accept a number too, and never let an odd ID
+    // fail the whole feed: anything else reads as nil.
+    func flexibleID(_ key: Key) -> String? {
+        (try? decodeIfPresent(String.self, forKey: key))
+            ?? (try? decodeIfPresent(Int.self, forKey: key)).flatMap { $0.map(String.init) }
+    }
 }
 
 struct Competition: Decodable {
@@ -57,12 +85,9 @@ struct Team: Decodable {
 
     private enum CodingKeys: String, CodingKey { case id, displayName, abbreviation, logo }
 
-    // The ID comes as text today. Accept a number too, and never let an odd ID
-    // fail the whole feed.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = (try? c.decodeIfPresent(String.self, forKey: .id))
-            ?? (try? c.decodeIfPresent(Int.self, forKey: .id)).flatMap { $0.map(String.init) }
+        id = c.flexibleID(.id)
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
         abbreviation = try c.decodeIfPresent(String.self, forKey: .abbreviation)
         logo = try c.decodeIfPresent(String.self, forKey: .logo)
@@ -128,6 +153,7 @@ func parseMatches(_ data: Data) throws -> [Match] {
         let leagueName = block.leagues?.first?.name ?? ""
         let leagueID = block.leagues?.first?.id ?? ""
         for event in block.events ?? [] {
+            guard let eventID = event.id, !eventID.isEmpty else { continue }
             let comp = event.competitions?.first
             let status = comp?.status ?? event.status
             let sides = (comp?.competitors ?? []).map { c in
@@ -140,7 +166,7 @@ func parseMatches(_ data: Data) throws -> [Match] {
                 )
             }
             result.append(Match(
-                id: event.id,
+                id: eventID,
                 leagueID: leagueID,
                 league: leagueName,
                 title: event.name ?? sides.map(\.name).joined(separator: " v "),

@@ -7,8 +7,8 @@ struct PBPResponse: Decodable {
 }
 
 struct PBPPage: Decodable {
-    let pageCount: Int
-    let items: [PBPItem]
+    let pageCount: Int?
+    let items: [PBPItem]?
 }
 
 struct PBPItem: Decodable {
@@ -255,12 +255,12 @@ private func fetchPBPPage(_ match: Match, page: Int) async throws -> PBPPage {
 // have at least 5 overs for the "last 5 overs" number.
 func fetchLiveDetail(_ match: Match) async throws -> LiveDetail? {
     let first = try await fetchPBPPage(match, page: 1)
-    let lastPage = first.pageCount
+    let lastPage = first.pageCount ?? 0
     guard lastPage > 0 else { return nil }
     var items: [PBPItem] = []
     let firstPage = max(1, lastPage - 2)
     for p in firstPage...lastPage {
-        items += p == 1 ? first.items : try await fetchPBPPage(match, page: p).items
+        items += (p == 1 ? first.items : try await fetchPBPPage(match, page: p).items) ?? []
     }
     return buildLiveDetail(items, period: match.period, startsMidInnings: firstPage > 1)
 }
