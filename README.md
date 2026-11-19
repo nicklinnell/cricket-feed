@@ -42,7 +42,8 @@ The icon is `assets/icon-1024.png`. The build turns it into `AppIcon.icns`.
 - With "Notify me of wickets and milestones" on (the default), you get a macOS notification for your teams' matches: each wicket, every 100 team runs, a batter reaching 50, 100, 150 and so on, and the result. Batter alerts only come for matches in your panel, as only those get ball-by-ball data. Stopped matches stay quiet. macOS asks for permission the first time. Nothing fires for what happened before the app saw the match.
 - Drag the window anywhere to move it.
 - Right-click a match to open it on Cricinfo or stop watching it. A stopped match stays stopped until you tick it again in the match list.
-- Menu bar icon: show/hide window, quit. There's no Dock icon.
+- Menu bar icon: show/hide window, Open at Login, quit. There's no Dock icon.
+- Open at Login is off to start with. Tick it to have the app open when you log in to your Mac. The menu reads the setting from macOS each time it opens, so a change made in System Settings > General > Login Items shows up here too. If macOS wants you to allow it first, the item shows a dash. Click it to go to System Settings. It only works for a copy in `/Applications` or `~/Applications` (or a folder inside them). Anywhere else, such as `build/`, it's greyed out.
 - Scores refresh every 10 seconds.
 
 ## Data source

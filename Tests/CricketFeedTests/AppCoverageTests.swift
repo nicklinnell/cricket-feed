@@ -14,7 +14,7 @@ extension NetworkTests {
 
         // A delegate on a throwaway defaults suite. Keep `temp` alive as long as the delegate.
         func makeDelegate(_ temp: TempDefaults) -> AppDelegate {
-            AppDelegate(store: ScoreStore(defaults: temp.defaults))
+            AppDelegate(store: ScoreStore(defaults: temp.defaults), loginItem: FakeLoginItem())
         }
 
         // Waits until the store's first refresh fails (no stub routes), proving start() ran.
@@ -68,15 +68,18 @@ extension NetworkTests {
             // Room below the panel: the screen's usable height less the 20pt gap at the top.
             #expect(abs(d.room.height - (f.height - 20)) < 1)
 
-            // Menu bar item with show/hide, a separator and quit.
+            // Menu bar item with show/hide, open at login, a separator and quit.
             let item = try #require(d.statusItem)
             #expect(item.button?.image != nil)
             #expect(item.button?.image?.isTemplate == true)
             let menu = try #require(item.menu)
-            #expect(menu.items.map(\.title) == ["Show / Hide Scores", "", "Quit"])
+            #expect(menu.items.map(\.title) == ["Show / Hide Scores", "Open at Login", "", "Quit"])
             #expect(menu.items[0].action == #selector(AppDelegate.togglePanel))
-            #expect(menu.items[1].isSeparatorItem)
-            #expect(menu.items[2].action == #selector(NSApplication.terminate(_:)))
+            #expect(menu.items[1].action == #selector(AppDelegate.toggleLoginItem))
+            #expect(menu.items[1].state == .off)
+            #expect(menu.items[2].isSeparatorItem)
+            #expect(menu.items[3].action == #selector(NSApplication.terminate(_:)))
+            #expect(menu.delegate === d)
 
             try await waitForFirstRefresh(d)
 
