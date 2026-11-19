@@ -98,7 +98,7 @@ struct Team: Decodable {
 
 struct Match: Identifiable, Hashable {
     struct Side: Hashable {
-        var id: String = ""      // ESPN team ID, same in every competition
+        let id: String           // ESPN team ID, same in every competition
         let name: String
         let short: String
         let score: String

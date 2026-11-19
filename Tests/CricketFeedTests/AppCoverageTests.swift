@@ -227,8 +227,9 @@ extension NetworkTests {
             #expect(panel.isVisible)
         }
 
-        // The panel's resize callback and screen observers hold the delegate weakly,
-        // so they never keep it (and its store and refresh loop) alive.
+        // The screen observers are never removed, so they must hold the delegate weakly
+        // or it (and its store and refresh loop) would live on. Not a check on the resize
+        // callback: tearDown drops the panel's content, which would free that either way.
         @Test func launchCallbacksDoNotRetainDelegate() async throws {
             NSWindow.removeFrame(usingName: Self.frameName)
             let temp = TempDefaults()
