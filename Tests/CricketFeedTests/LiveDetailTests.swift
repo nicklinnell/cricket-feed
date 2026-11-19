@@ -29,6 +29,16 @@ import Testing
         #expect(try label(ball(over: 1, runs: 1, noBall: 1)) == "1nb")
     }
 
+    // Real ESPN shape for a no-ball plus 2 leg byes: scoreValue says 1, the innings block says 3.
+    @Test func noBallWithLegByesCountsEveryRun() throws {
+        let json = ball(over: 2, runs: 1, noBall: 1, innings: #"{"totalRuns":3}"#)
+        #expect(ballFor(try items([json])[0]) == Ball(label: "3nb", kind: .extra, runs: 3))
+        let detail = try #require(buildLiveDetail(try items([ball(over: 2, runs: 6, type: "six"), json]), period: 4, startsMidInnings: false))
+        #expect(detail.overs.map(\.runs) == [9])
+        // No per-ball total in the feed: fall back to scoreValue.
+        #expect(try label(ball(over: 2, runs: 1, noBall: 1, innings: #"{"runRate":7.5}"#)) == "1nb")
+    }
+
     @Test func wicketBeatsExtras() throws {
         #expect(try label(ball(over: 1, runs: 1, wide: 1, out: "A")) == "W")
     }
@@ -48,6 +58,12 @@ import Testing
     @Test func widePenaltyIsNotRunning() throws {
         #expect(try onStrike(ball(over: 1, runs: 2, wide: 1)) == "B")
         #expect(try onStrike(ball(over: 1, runs: 1, wide: 1)) == "A")
+    }
+
+    // No-ball plus 2 leg byes: they ran 2, so the striker stays.
+    @Test func noBallLegByesCountAsRunning() throws {
+        #expect(try onStrike(ball(over: 1, runs: 1, noBall: 1, innings: #"{"totalRuns":3}"#)) == "A")
+        #expect(try onStrike(ball(over: 1, runs: 1, noBall: 1, innings: #"{"totalRuns":2}"#)) == "B")
     }
 
     @Test func outBatterLeavesWithNoStrikeMark() throws {

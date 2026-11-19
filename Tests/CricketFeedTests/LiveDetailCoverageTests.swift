@@ -104,6 +104,8 @@ extension NetworkTests {
             (#"{"scoreValue":0,"dismissal":{"dismissal":true}}"#, "W", .wicket, 0),
             (#"{"scoreValue":1,"over":{"wide":1}}"#, "1wd", .extra, 1),
             (#"{"scoreValue":1,"over":{"noBall":1}}"#, "1nb", .extra, 1),
+            // Real ESPN item: no-ball plus 2 leg byes. scoreValue only has the penalty.
+            (#"{"scoreValue":1,"playType":{"description":"leg bye"},"over":{"noBall":1,"legByes":2},"innings":{"totalRuns":3}}"#, "3nb", .extra, 3),
             (#"{"scoreValue":2,"over":{"legByes":2}}"#, "2lb", .extra, 2),
             (#"{"scoreValue":4,"over":{"byes":4}}"#, "4b", .extra, 4),
             (#"{"scoreValue":4,"playType":{"description":"four"}}"#, "4", .four, 4),
