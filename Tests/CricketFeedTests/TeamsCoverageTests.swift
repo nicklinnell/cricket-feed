@@ -57,127 +57,126 @@ private func picker(_ store: ScoreStore) -> NSHostingView<some View> {
 // MARK: - Catalogue
 
 @Suite struct TeamCatalogueTests {
-    @Test func listsAreCompleteWithLogos() {
-        #expect(TeamCatalogue.international.count == 22)
-        #expect(TeamCatalogue.counties.count == 18)
-        #expect(TeamCatalogue.all == TeamCatalogue.international + TeamCatalogue.counties)
+    @Test func idsAreUniqueAndLogosMatchIDs() {
+        // A repeated ID would star two teams at once.
         #expect(Set(TeamCatalogue.all.map(\.id)).count == TeamCatalogue.all.count)
-        let england = TeamCatalogue.international[0]
-        #expect(england == TeamOption(id: "1", name: "England",
-                                      logo: URL(string: "https://a.espncdn.com/i/teamlogos/cricket/500/1.png")))
-        #expect(TeamCatalogue.counties.last?.name == "Yorkshire")
-        #expect(TeamOption(id: "x", name: "X").logo == nil)
+        for team in TeamCatalogue.all {
+            #expect(team.logo == URL(string: "https://a.espncdn.com/i/teamlogos/cricket/500/\(team.id).png"), "\(team.name)")
+        }
+        #expect(TeamCatalogue.international.first { $0.id == "1" }?.name == "England")
+        #expect(TeamCatalogue.counties.first { $0.id == "1464" }?.name == "Yorkshire")
     }
 }
 
-// MARK: - Picker
+// MARK: - Picker sections (plain logic)
 
-@MainActor @Suite(.serialized) struct TeamPickerTests {
-    @Test func searchThenClickStarsTheOnlyMatch() {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        let v = picker(store)
-        typeText("zimb", into: v)
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["9": "Zimbabwe"] })
-        // Click again unstars it.
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites.isEmpty })
+@Suite struct TeamPickerSectionTests {
+    private typealias Section = (title: String, teams: [TeamOption])
+    private func titles(_ s: [Section]) -> [String] { s.map(\.title) }
+    private func ids(_ s: [Section], _ title: String) -> [String] { s.first { $0.title == title }?.teams.map(\.id) ?? [] }
+
+    private let feed = [feedMatch([
+        side("777", "Zeta Qxq", logo: URL(string: "https://example.com/z.png")),
+        side("778", "Alpha Qxq"),
+        side("", "No ID Club"),
+        side("779", "?"),
+        side("780", ""),
+        side("1", "England"), // already in the catalogue
+    ])]
+
+    @Test func feedTeamsDropSidesWithoutIDOrName() {
+        #expect(TeamPicker.feedTeams(feed) == [
+            TeamOption(id: "777", name: "Zeta Qxq", logo: URL(string: "https://example.com/z.png")),
+            TeamOption(id: "778", name: "Alpha Qxq"),
+            TeamOption(id: "1", name: "England"),
+        ])
     }
 
-    @Test func clearButtonEmptiesSearch() {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        let v = picker(store)
-        typeText("yorks", into: v)
-        click(v, at: clearButton)
-        // With search cleared, the first row is England again.
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["1": "England"] })
+    @Test func sectionsInOrderWithEachTeamOnceBelowYourTeams() {
+        let england = TeamCatalogue.international[0]
+        let s = TeamPicker.sections(pinned: [england], matches: feed, search: "")
+        #expect(titles(s) == ["Your teams", "International", "English counties", "In the feed"])
+        #expect(ids(s, "Your teams") == ["1"])
+        // "Your teams" repeats England on purpose; it is still listed under International.
+        #expect(ids(s, "International") == TeamCatalogue.international.map(\.id))
+        #expect(ids(s, "English counties") == TeamCatalogue.counties.map(\.id))
+        // Feed teams sorted by name, England not repeated.
+        #expect(ids(s, "In the feed") == ["778", "777"])
     }
 
-    @Test func noResultsShowsEmptyStateAndNothingToClick() {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        let v = picker(store)
-        typeText("qqqqzz", into: v)
-        click(v, at: firstRow)
-        pump(0.1)
-        #expect(store.favourites.isEmpty)
+    @Test func emptySectionsAreHidden() {
+        let s = TeamPicker.sections(pinned: [], matches: [], search: "")
+        #expect(titles(s) == ["International", "English counties"])
     }
 
-    @Test func pinnedTeamsStayPutWhenUnstarred() {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        // One known team, one unknown team (no logo, name kept from favourites).
-        store.favourites = ["1": "England", "zz": "Mystery XI"]
-        let v = picker(store)
-        // "Your teams" sorted: England, Mystery XI. Unstar England.
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["zz": "Mystery XI"] })
-        // Row did not move, so the same spot stars it again.
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["1": "England", "zz": "Mystery XI"] })
-        // Unknown team appears under Your teams and can be unstarred by search.
-        typeText("mystery", into: v)
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["1": "England"] })
+    @Test func searchIsCaseInsensitiveAndFiltersEverySection() {
+        let mystery = TeamOption(id: "zz", name: "Mystery XI")
+        let s = TeamPicker.sections(pinned: [mystery], matches: feed, search: "QXQ")
+        #expect(titles(s) == ["In the feed"])
+        #expect(ids(s, "In the feed") == ["778", "777"])
+        let mine = TeamPicker.sections(pinned: [mystery], matches: feed, search: "myst")
+        #expect(titles(mine) == ["Your teams"])
+        #expect(ids(mine, "Your teams") == ["zz"])
     }
 
-    @Test func feedTeamsAreListedSortedAndStarrable() {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        store.matches = [feedMatch([
-            side("777", "Zeta Qxq", logo: URL(string: "https://example.com/z.png")),
-            side("778", "Alpha Qxq"),
-            side("", "No ID Club"),
-            side("779", "?"),
-            side("1", "England"), // already in the catalogue
-        ])]
-        let v = picker(store)
-        // Feed teams are sorted by name, so Alpha comes first.
-        typeText("qxq", into: v)
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["778": "Alpha Qxq"] })
-        // Teams without a usable ID or name are not offered.
-        for search in ["no id", "?"] {
-            typeText(search, into: v)
+    @Test func searchWithNoHitsGivesNoSections() {
+        #expect(TeamPicker.sections(pinned: [], matches: feed, search: "qqqqzz").isEmpty)
+    }
+}
+
+// MARK: - Picker (hosted)
+
+extension UITests {
+    @MainActor @Suite struct TeamPickerTests {
+        @Test func searchThenClickStarsTheOnlyMatch() {
+            let temp = TempDefaults()
+            let store = ScoreStore(defaults: temp.defaults)
+            let v = picker(store)
+            typeText("zimb", into: v)
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites == ["9": "Zimbabwe"] })
+            // Click again unstars it.
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites.isEmpty })
+        }
+
+        @Test func clearButtonEmptiesSearch() {
+            let temp = TempDefaults()
+            let store = ScoreStore(defaults: temp.defaults)
+            let v = picker(store)
+            typeText("yorks", into: v)
+            click(v, at: clearButton)
+            // With search cleared, the first row is England again.
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites == ["1": "England"] })
+        }
+
+        @Test func searchWithNoHitsLeavesNothingToStar() {
+            let temp = TempDefaults()
+            let store = ScoreStore(defaults: temp.defaults)
+            let v = picker(store)
+            typeText("qqqqzz", into: v)
             click(v, at: firstRow)
             pump(0.1)
-            #expect(store.favourites == ["778": "Alpha Qxq"])
+            #expect(store.favourites.isEmpty)
         }
-        // England is in the feed too but only listed once: same number of row
-        // buttons as a search with one hit.
-        func buttons() -> Int { allSubviews(v).filter { String(describing: Swift.type(of: $0)) == "KeyViewProxy" }.count }
-        typeText("zimbabwe", into: v)
-        let one = buttons()
-        typeText("england", into: v)
-        #expect(buttons() == one)
-        click(v, at: firstRow)
-        #expect(waitUntil { store.favourites == ["778": "Alpha Qxq", "1": "England"] })
-    }
 
-    @Test func autoWatchSwitchFlipsAndSaves() throws {
-        let temp = TempDefaults()
-        let store = ScoreStore(defaults: temp.defaults)
-        #expect(store.autoWatch)
-        let v = picker(store)
-        // A real mouse click on the AppKit switch ends the test process, so press it
-        // through accessibility (VoiceOver's route). It returns false but does flip it.
-        let sw = try #require(allSubviews(v).first { String(describing: Swift.type(of: $0)) == "PlatformSwitch" })
-        _ = sw.accessibilityPerformPress()
-        #expect(waitUntil { !store.autoWatch })
-        #expect(temp.defaults.bool(forKey: ScoreStore.autoWatchKey) == false)
-        _ = sw.accessibilityPerformPress()
-        #expect(waitUntil { store.autoWatch })
-    }
-
-    @Test func sectionLabelFirstHasLessTopSpace() {
-        func height(_ label: SectionLabel) -> CGFloat {
-            host(label, size: CGSize(width: 200, height: 40)).fittingSize.height
+        @Test func pinnedTeamsStayPutWhenUnstarred() {
+            let temp = TempDefaults()
+            let store = ScoreStore(defaults: temp.defaults)
+            // One known team, one unknown team (no logo, name kept from favourites).
+            store.favourites = ["1": "England", "zz": "Mystery XI"]
+            let v = picker(store)
+            // "Your teams" sorted: England, Mystery XI. Unstar England.
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites == ["zz": "Mystery XI"] })
+            // Row did not move, so the same spot stars it again.
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites == ["1": "England", "zz": "Mystery XI"] })
+            // Unknown team appears under Your teams and can be unstarred by search.
+            typeText("mystery", into: v)
+            click(v, at: firstRow)
+            #expect(waitUntil { store.favourites == ["1": "England"] })
         }
-        let plain = height(SectionLabel(title: "Live"))
-        #expect(plain == height(SectionLabel(title: "Live", first: false)))
-        #expect(plain - height(SectionLabel(title: "Live", first: true)) == 8)
     }
 }

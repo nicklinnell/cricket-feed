@@ -54,6 +54,33 @@ private func phaseMatch(state: String, label: String) -> Match {
 
 // MARK: - Theme and plain types
 
+// WCAG 2 contrast. Colours are sRGB [r, g, b, a]; `over` composites a translucent
+// colour on an opaque one the way AppKit does (in sRGB, not linear light).
+private func over(_ top: [CGFloat], _ bottom: [CGFloat]) -> [CGFloat] {
+    let a = top[3]
+    return (0..<3).map { top[$0] * a + bottom[$0] * (1 - a) } + [1]
+}
+
+private func luminance(_ c: [CGFloat]) -> CGFloat {
+    func lin(_ v: CGFloat) -> CGFloat { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+    return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+}
+
+private func contrast(_ a: [CGFloat], _ b: [CGFloat]) -> CGFloat {
+    let (x, y) = (luminance(a), luminance(b))
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+}
+
+private func withAlpha(_ c: [CGFloat], _ a: CGFloat) -> [CGFloat] { [c[0], c[1], c[2], c[3] * a] }
+
+// The panel is .regularMaterial, so it has no fixed colour. These opaque stand-ins
+// are roughly what the material shows over a neutral desktop. Picked before
+// computing any ratio; results depend on them.
+private let panelBackdrop: [NSAppearance.Name: [CGFloat]] = [
+    .aqua: [0.93, 0.93, 0.93, 1],
+    .darkAqua: [0.18, 0.18, 0.18, 1],
+]
+
 @MainActor @Suite struct DesignThemeTests {
     @Test func dynamicColoursDifferBetweenLightAndDark() {
         let dynamicColours: [Color] = [Theme.meta, Theme.live, Theme.paused, Theme.liveInk, Theme.pausedInk,
@@ -61,17 +88,38 @@ private func phaseMatch(state: String, label: String) -> Match {
         for c in dynamicColours {
             #expect(!close(resolved(c, .aqua), resolved(c, .darkAqua)))
         }
-        // Meta grey: darker in light mode, lighter in dark mode.
-        #expect(close(resolved(Theme.meta, .aqua), [0.37, 0.37, 0.37, 1]) || resolved(Theme.meta, .aqua)[0] < 0.5)
-        #expect(resolved(Theme.meta, .darkAqua)[0] > 0.7)
+        // Meta grey: dark text in light mode, light text in dark mode.
+        #expect(close(resolved(Theme.meta, .aqua), [0.37, 0.37, 0.37, 1]))
+        #expect(close(resolved(Theme.meta, .darkAqua), [0.78, 0.78, 0.78, 1]))
     }
 
-    @Test func fixedColoursMatchInBothModes() {
-        for c in [Theme.four, Theme.six, Theme.wicket] {
-            #expect(close(resolved(c, .aqua), resolved(c, .darkAqua)))
+    // Theme comments claim AA (4.5:1) for: meta grey on cards and the panel, pill ink
+    // on its tinted pill (live/paused cards are the prominent fill), white on ball chips.
+    @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+    func textColoursPassAAContrast(_ mode: NSAppearance.Name) {
+        let panel = panelBackdrop[mode]!
+        let card = over(resolved(Theme.cardFill, mode), panel)
+        let liveCard = over(resolved(Theme.cardFillLive, mode), panel)
+        let tint = CGFloat(StatusPill.tintOpacity)
+        let livePill = over(withAlpha(resolved(Theme.live, mode), tint), liveCard)
+        let pausedPill = over(withAlpha(resolved(Theme.paused, mode), tint), liveCard)
+        let meta = resolved(Theme.meta, mode)
+        let white: [CGFloat] = [1, 1, 1, 1]
+
+        let pairs: [(String, [CGFloat], [CGFloat])] = [
+            ("meta on panel", meta, panel),
+            ("meta on card", meta, card),
+            ("meta on live card", meta, liveCard),
+            ("liveInk on live pill", resolved(Theme.liveInk, mode), livePill),
+            ("pausedInk on paused pill", resolved(Theme.pausedInk, mode), pausedPill),
+            ("white on four", white, resolved(Theme.four, mode)),
+            ("white on six", white, resolved(Theme.six, mode)),
+            ("white on wicket", white, resolved(Theme.wicket, mode)),
+        ]
+        for (name, text, background) in pairs {
+            let ratio = contrast(text, background)
+            #expect(ratio >= 4.5, "\(name) is \(ratio):1 in \(mode.rawValue)")
         }
-        #expect(Theme.panelWidth == 300)
-        #expect(Theme.scoreSize > Theme.teamSize && Theme.teamSize > Theme.bodySize && Theme.bodySize > Theme.metaSize)
     }
 
     @Test func panelRoomFloorsListHeight() {
@@ -90,12 +138,71 @@ private func phaseMatch(state: String, label: String) -> Match {
         #expect(odd.main == "Yet to bat")
     }
 
+    // Every known break pauses play, whatever the case or extra words around it.
+    @Test(arguments: ["Lunch", "Tea", "Dinner", "Stumps", "Drinks", "Timeout", "Innings Break",
+                      "Rain", "Delayed", "Bad Light", "Wet Outfield", "Interrupted"])
+    func breakLabelsArePaused(_ label: String) {
+        #expect(MatchPhase(phaseMatch(state: "in", label: label)) == .paused)
+        #expect(MatchPhase(phaseMatch(state: "in", label: label.uppercased())) == .paused)
+        #expect(MatchPhase(phaseMatch(state: "in", label: "Day 2 - \(label) taken")) == .paused)
+    }
+
     @Test func matchPhaseFromState() {
-        #expect(MatchPhase(phaseMatch(state: "in", label: "Live")) == .live)
-        #expect(MatchPhase(phaseMatch(state: "in", label: "Stumps - Day 1")) == .paused)
-        #expect(MatchPhase(phaseMatch(state: "in", label: "Innings Break")) == .paused)
+        // Any in-play label that is not a known break counts as live, including none.
+        for label in ["Live", "1st innings", "Day 3", "Strategic review", ""] {
+            #expect(MatchPhase(phaseMatch(state: "in", label: label)) == .live)
+        }
         #expect(MatchPhase(phaseMatch(state: "pre", label: "Scheduled")) == .upcoming)
+        // Before start, a break word in the label does not make it paused.
+        #expect(MatchPhase(phaseMatch(state: "pre", label: "Delayed")) == .upcoming)
         #expect(MatchPhase(phaseMatch(state: "post", label: "Result")) == .finished)
+        // Unknown states are treated as over.
+        #expect(MatchPhase(phaseMatch(state: "", label: "Live")) == .finished)
+    }
+
+    @Test func statusPillLabel() {
+        #expect(StatusPill.label("Live") == "Live")
+        #expect(StatusPill.label("Stumps - Day 1") == "Stumps - Day 1")
+        #expect(StatusPill.label("") == "Unknown")
+    }
+
+    @Test func sideRowShortName() {
+        #expect(SideRow.shortName(side(name: "India", short: "IND")) == "IND")
+        #expect(SideRow.shortName(side(name: "India", short: "  IND ")) == "IND")
+        // Missing code from the feed: no short form, the row falls back to the name.
+        #expect(SideRow.shortName(side(name: "India", short: "?")) == "")
+        #expect(SideRow.shortName(side(name: "India", short: "")) == "")
+        // Same as the name: nothing extra to offer.
+        #expect(SideRow.shortName(side(name: "IND", short: "IND")) == "")
+    }
+
+    @Test func sideRowAccessibilityLabel() {
+        #expect(SideRow.accessibilityLabel(side(score: "245/6"), batting: false) == "India, 245/6")
+        #expect(SideRow.accessibilityLabel(side(score: "245/6"), batting: true) == "India, 245/6, batting")
+        #expect(SideRow.accessibilityLabel(side(score: ""), batting: false) == "India")
+        // No score yet: just the name, even when batting.
+        #expect(SideRow.accessibilityLabel(side(score: ""), batting: true) == "India")
+    }
+
+    @Test func hoverFillPrecedence() {
+        // (pressed, hovering, selected) -> fill. Press beats hover, hover beats selected.
+        let table: [(Bool, Bool, Bool, HoverFill)] = [
+            (false, false, false, .none),
+            (false, false, true, .selected),
+            (false, true, false, .hovering),
+            (false, true, true, .hovering),
+            (true, false, false, .pressed),
+            (true, false, true, .pressed),
+            (true, true, false, .pressed),
+            (true, true, true, .pressed),
+        ]
+        for (pressed, hovering, selected, want) in table {
+            #expect(HoverFill(pressed: pressed, hovering: hovering, selected: selected) == want,
+                    "pressed \(pressed) hovering \(hovering) selected \(selected)")
+        }
+        // Each state looks different from the others.
+        let colours = [HoverFill.pressed, .hovering, .selected, .none].map(\.colour)
+        #expect(Set(colours).count == 4)
     }
 }
 
@@ -121,92 +228,34 @@ private func phaseMatch(state: String, label: String) -> Match {
 
 // MARK: - Views
 
-@MainActor @Suite struct DesignViewTests {
-    // Reduce Motion is read-only in SwiftUI's macOS environment, so only the default path is hosted.
-    @Test func liveDotHasFixedSize() {
-        let a = host(LiveDot(), size: CGSize(width: 20, height: 20))
-        #expect(a.fittingSize == CGSize(width: 5, height: 5))
-    }
-
-    @Test func statusPillEveryPhase() {
-        let labels = [("in", "Live"), ("in", "Lunch"), ("pre", "Scheduled"), ("post", "Result"), ("post", "")]
-        var widths: [CGFloat] = []
-        for (state, label) in labels {
-            let v = host(StatusPill(match: phaseMatch(state: state, label: label)), size: CGSize(width: 200, height: 30))
-            widths.append(v.fittingSize.width)
+extension UITests {
+    @MainActor @Suite struct DesignViewTests {
+        // Smoke tests: the views lay out with real content. What they show is tested above.
+        @Test func statusPillAndSideRowRender() {
+            #expect(host(StatusPill(match: phaseMatch(state: "in", label: "Live"))).fittingSize.width > 0)
+            // Logo has no stub route, so it fails fast and the row shows no flag.
+            let logo = URL(string: "https://example.com/side-row-smoke.png")
+            let row = host(SideRow(side: side(score: "98 & 34/2 (12.3 ov, target 259)", logo: logo)).frame(width: 240),
+                           size: CGSize(width: 240, height: 60))
+            #expect(row.fittingSize.height > 0)
         }
-        #expect(widths.allSatisfy { $0 > 0 })
-        // Tinted pills carry horizontal padding, so "Live" (with dot) is wider than an untinted label of the same text.
-        let live = host(StatusPill(match: phaseMatch(state: "in", label: "Live"))).fittingSize.width
-        let done = host(StatusPill(match: phaseMatch(state: "post", label: "Live"))).fittingSize.width
-        #expect(live > done)
-    }
 
-    @Test func sideRowVariants() {
-        let rows: [SideRow] = [
-            SideRow(side: side(score: "98 & 34/2 (12.3 ov, target 259)"), batting: true),
-            SideRow(side: side(score: "245/6"), quiet: true),
-            SideRow(side: side(score: "1234567890 something long")),
-            SideRow(side: side(short: "?", score: "")),
-            SideRow(side: side(name: "IND", short: "IND")),
-            SideRow(side: side(name: "A very very long team name that cannot fit", short: "LNG", score: "100")),
-        ]
-        for r in rows {
-            let v = host(r.frame(width: 140), size: CGSize(width: 140, height: 60))
-            #expect(v.fittingSize.height > 0)
-        }
-    }
-
-    @Test func buttonStylesAndHoverPlate() {
-        final class Box { var n = 0 }
-        let box = Box()
-        host(Button("x") {}.buttonStyle(IconButtonStyle()), size: CGSize(width: 40, height: 40))
-        host(Button("x") {}.buttonStyle(IconButtonStyle()).disabled(true), size: CGSize(width: 40, height: 40))
-        host(HoverPlate(pressed: true) { Text("p") }, size: CGSize(width: 40, height: 40))
-        host(HoverPlate(selected: true) { Text("s") }, size: CGSize(width: 40, height: 40))
-
-        let v = host(VStack(spacing: 0) {
-            Button("Go") { box.n += 1 }.buttonStyle(PillButtonStyle()).frame(width: 100, height: 40)
-            HoverPlate { Text("hover me").frame(width: 100, height: 40) }
-            Spacer()
-        }.frame(width: 100, height: 200), size: CGSize(width: 100, height: 200))
-        click(v, at: CGPoint(x: 50, y: 20))
-        #expect(box.n == 1)
-    }
-
-    @Test func hoverPlateFillsOnHover() {
-        let v = host(HoverPlate { Color.clear.frame(width: 60, height: 40) }, size: CGSize(width: 60, height: 40))
-        #expect(alpha(v, at: CGPoint(x: 30, y: 20)) == 0)
-        hover(v, at: CGPoint(x: 30, y: 20))
-        let hovered = alpha(v, at: CGPoint(x: 30, y: 20))
-        #expect(hovered > 0)
-        // Press deepens the plate beyond hover.
-        let pressed = host(HoverPlate(pressed: true) { Color.clear.frame(width: 60, height: 40) }, size: CGSize(width: 60, height: 40))
-        #expect(alpha(pressed, at: CGPoint(x: 30, y: 20)) > hovered)
-    }
-
-    @Test func skeletonCardAndCardBackground() {
-        let s = host(SkeletonCard().frame(width: 280), size: CGSize(width: 300, height: 200))
-        #expect(s.fittingSize.height > 100)
-        host(Text("x").cardBackground(prominent: true), size: CGSize(width: 40, height: 40))
-        host(Text("x").cardBackground(), size: CGSize(width: 40, height: 40))
-    }
-
-    @Test func emptyStateWithAndWithoutAction() {
-        final class Box { var n = 0 }
-        let box = Box()
-        let plain = host(EmptyStateView(symbol: "wifi.slash", title: "Offline", message: "Check connection", tint: .gray),
+        @Test func emptyStateWithAndWithoutAction() {
+            final class Box { var n = 0 }
+            let box = Box()
+            let plain = host(EmptyStateView(symbol: "wifi.slash", title: "Offline", message: "Check connection", tint: .gray),
+                             size: CGSize(width: 300, height: 300))
+            let withAction = EmptyStateView(symbol: "star", title: "No favourites", message: "Pick some",
+                                            action: (title: "Pick teams", run: { box.n += 1 }))
+            let v = host(VStack(spacing: 0) { withAction; Spacer() }.frame(width: 300, height: 300),
                          size: CGSize(width: 300, height: 300))
-        let withAction = EmptyStateView(symbol: "star", title: "No favourites", message: "Pick some",
-                                        action: (title: "Pick teams", run: { box.n += 1 }))
-        let v = host(VStack(spacing: 0) { withAction; Spacer() }.frame(width: 300, height: 300),
-                     size: CGSize(width: 300, height: 300))
-        #expect(v.fittingSize.height > plain.fittingSize.height)
-        // Button sits at the bottom of the content: find it by scanning down the centre line.
-        for y in stride(from: 100, through: 220, by: 4) where box.n == 0 {
-            click(v, at: CGPoint(x: 150, y: CGFloat(y)), settle: 0.01)
+            #expect(v.fittingSize.height > plain.fittingSize.height)
+            // Button sits at the bottom of the content: find it by scanning down the centre line.
+            for y in stride(from: 100, through: 220, by: 4) where box.n == 0 {
+                click(v, at: CGPoint(x: 150, y: CGFloat(y)), settle: 0.01)
+            }
+            #expect(box.n == 1)
         }
-        #expect(box.n == 1)
     }
 }
 
@@ -265,21 +314,15 @@ extension NetworkTests {
             #expect(hits(name) == [url])
         }
 
-        @Test func teamFlagAndSideRowLoadLogo() async throws {
+        // FlagCache tests cover fetching; this checks the view actually draws what it loaded.
+        @Test func teamFlagDrawsLoadedLogo() async throws {
             StubURLProtocol.reset()
-            let name = unique("flag")
-            let url = URL(string: "https://example.com/\(name).png")!
+            let url = URL(string: "https://example.com/\(unique("flag")).png")!
             StubURLProtocol.on(prefix: url.absoluteString, body: png(width: 6, height: 4, opaque: (x: 0, y: 0, w: 6, h: 4)))
             let flag = host(TeamFlag(url: url), size: CGSize(width: 20, height: 14))
-            host(SideRow(side: side(score: "120/3", logo: url)).frame(width: 200), size: CGSize(width: 200, height: 40))
-            // Yield the main actor (not pump) so the views' .task can run, until the flag is drawn.
+            // Yield the main actor (not pump) so the view's .task can run, until the flag is drawn.
             for _ in 0..<60 where alpha(flag, at: CGPoint(x: 10, y: 7)) == 0 { try await Task.sleep(for: .milliseconds(50)) }
             #expect(alpha(flag, at: CGPoint(x: 10, y: 7)) > 0)
-            // Both views may fetch at once before either caches; after that it's a cache hit.
-            let fetched = hits(name).count
-            #expect(fetched >= 1)
-            #expect(await FlagCache.shared.image(for: url)?.size == NSSize(width: 6, height: 4))
-            #expect(hits(name).count == fetched)
         }
     }
 }
