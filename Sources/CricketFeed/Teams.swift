@@ -44,26 +44,30 @@ struct TeamPicker: View {
     init(store: ScoreStore, maxHeight: CGFloat = 320) {
         self.store = store
         self.maxHeight = maxHeight
-        let pool = TeamCatalogue.all + Self.feedTeams(store)
+        let pool = TeamCatalogue.all + Self.feedTeams(store.matches)
         _pinned = State(initialValue: store.favourites
             .map { id, name in pool.first { $0.id == id } ?? TeamOption(id: id, name: name) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
     }
 
     // Every team in today's feed that has an ID (needed to star it).
-    private static func feedTeams(_ store: ScoreStore) -> [TeamOption] {
-        store.matches.flatMap(\.sides)
+    static func feedTeams(_ matches: [Match]) -> [TeamOption] {
+        matches.flatMap(\.sides)
             .filter { !$0.id.isEmpty && !$0.name.isEmpty && $0.name != "?" }
             .map { TeamOption(id: $0.id, name: $0.name, logo: $0.logo) }
     }
 
     // Your teams first, then the fixed lists, then anyone else in the feed.
     private var sections: [(title: String, teams: [TeamOption])] {
+        Self.sections(pinned: pinned, matches: store.matches, search: search)
+    }
+
+    static func sections(pinned: [TeamOption], matches: [Match], search: String) -> [(title: String, teams: [TeamOption])] {
         var seen = Set<String>()
         func fresh(_ list: [TeamOption]) -> [TeamOption] {
             list.filter { seen.insert($0.id).inserted }
         }
-        let other = Self.feedTeams(store)
+        let other = feedTeams(matches)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         // "Your teams" repeats rows from below on purpose.
         let all: [(String, [TeamOption])] = [
@@ -170,7 +174,7 @@ struct TeamRow: View {
 // Small capitals heading above a group of rows ("LIVE", "YOUR TEAMS").
 struct SectionLabel: View {
     let title: String
-    var first = false
+    let first: Bool
 
     var body: some View {
         Text(title)

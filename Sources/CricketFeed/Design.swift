@@ -121,6 +121,13 @@ struct LiveDot: View {
 
 struct StatusPill: View {
     let match: Match
+    // Strength of the live / paused colour behind the pill text.
+    static let tintOpacity = 0.15
+
+    // Text shown in the pill (drawn in capitals).
+    static func label(_ stateLabel: String) -> String {
+        stateLabel.isEmpty ? "Unknown" : stateLabel
+    }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var phase: MatchPhase { MatchPhase(match) }
@@ -138,7 +145,7 @@ struct StatusPill: View {
     var body: some View {
         HStack(spacing: 4) {
             if phase == .live { LiveDot().id(reduceMotion) }
-            Text(match.stateLabel.isEmpty ? "Unknown" : match.stateLabel)
+            Text(Self.label(match.stateLabel))
                 .font(.system(size: 10, weight: tinted ? .bold : .semibold))
                 .textCase(.uppercase)
                 .kerning(0.5)
@@ -147,7 +154,7 @@ struct StatusPill: View {
         .foregroundStyle(ink)
         .padding(.horizontal, tinted ? 7 : 0)
         .padding(.vertical, 3)
-        .background(tinted ? AnyShapeStyle((phase == .live ? Theme.live : Theme.paused).opacity(0.15)) : AnyShapeStyle(.clear), in: Capsule())
+        .background(tinted ? AnyShapeStyle((phase == .live ? Theme.live : Theme.paused).opacity(Self.tintOpacity)) : AnyShapeStyle(.clear), in: Capsule())
         .fixedSize()
     }
 }
@@ -205,12 +212,20 @@ struct SideRow: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(side.score.isEmpty ? side.name : "\(side.name), \(side.score)" + (batting ? ", batting" : ""))
+        .accessibilityLabel(Self.accessibilityLabel(side, batting: batting))
     }
 
-    private var shortName: String {
+    private var shortName: String { Self.shortName(side) }
+
+    // The feed's short code, or "" when it is missing ("?") or the same as the name.
+    static func shortName(_ side: Match.Side) -> String {
         let s = side.short.trimmingCharacters(in: .whitespaces)
         return s == "?" || s == side.name ? "" : s
+    }
+
+    // Name alone until there is a score. "batting" is only added after a score.
+    static func accessibilityLabel(_ side: Match.Side, batting: Bool) -> String {
+        side.score.isEmpty ? side.name : "\(side.name), \(side.score)" + (batting ? ", batting" : "")
     }
 }
 
@@ -317,32 +332,36 @@ struct HoverPlate<Content: View>: View {
     var selected = false
     var radius: CGFloat = 8
     @ViewBuilder var content: Content
-    @State private var hovering: Bool
-
-    init(pressed: Bool = false, selected: Bool = false, radius: CGFloat = 8, @ViewBuilder content: () -> Content) {
-        self.pressed = pressed
-        self.selected = selected
-        self.radius = radius
-        self.content = content()
-        _hovering = State(initialValue: false)
-    }
+    @State private var hovering = false
 
     var body: some View {
         content
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(fill)
+                    .fill(HoverFill(pressed: pressed, hovering: hovering, selected: selected).colour)
             )
             .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.12), value: hovering)
     }
 
-    private var fill: Color {
-        if pressed { return Color.primary.opacity(0.14) }
-        if hovering { return Color.primary.opacity(0.08) }
-        if selected { return Color.accentColor.opacity(0.10) }
-        return .clear
+}
+
+// Which highlight a HoverPlate shows. Press beats hover, hover beats selected.
+enum HoverFill: Equatable {
+    case pressed, hovering, selected, none
+
+    init(pressed: Bool, hovering: Bool, selected: Bool) {
+        self = pressed ? .pressed : hovering ? .hovering : selected ? .selected : .none
+    }
+
+    var colour: Color {
+        switch self {
+        case .pressed: Color.primary.opacity(0.14)
+        case .hovering: Color.primary.opacity(0.08)
+        case .selected: Color.accentColor.opacity(0.10)
+        case .none: .clear
+        }
     }
 }
 
