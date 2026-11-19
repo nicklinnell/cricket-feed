@@ -208,8 +208,9 @@ func playersFor(_ items: [PBPItem]) -> (batters: [BatterLine], bowlers: [BowlerL
     }
     // Both seen on the same ball: the one with more balls faced most likely came in first.
     batters.sort { a, b in
-        let fa = firstSeen[a.id] ?? .max, fb = firstSeen[b.id] ?? .max
-        return fa != fb ? fa < fb : (a.balls, a.id) > (b.balls, b.id)
+        // Every batter here came from an item, so both are always in firstSeen.
+        if let fa = firstSeen[a.id], let fb = firstSeen[b.id], fa != fb { return fa < fb }
+        return (a.balls, a.id) > (b.balls, b.id)
     }
 
     // Current bowler first.
