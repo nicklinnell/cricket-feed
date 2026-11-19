@@ -2,23 +2,41 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
-    enum Mode { case scores, matches, teams }
+    enum Mode {
+        case scores, matches, teams
+
+        var title: String {
+            switch self {
+            case .scores: "Cricket"
+            case .matches: "Pick matches"
+            case .teams: "Favourite teams"
+            }
+        }
+    }
+
+    // What the scores list shows instead of cards, or that it shows cards.
+    struct EmptyState: Equatable {
+        let symbol: String
+        let title: String
+        let message: String
+        // Invitations offer the match picker (blue); problems don't (grey).
+        let offersPicker: Bool
+    }
+
+    enum ListContent: Equatable {
+        case empty(EmptyState)
+        case loading(placeholders: Int)
+        case cards
+    }
 
     @ObservedObject var store: ScoreStore
     @ObservedObject var room: PanelRoom
-    var onSizeChange: (CGSize) -> Void
+    var onSizeChange: (CGSize) -> Void = { _ in }
     @State private var mode = Mode.scores
     @State private var refreshing = false
     @State private var spin = 0.0
     @State private var listHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    // Written out so the @State defaults above run through it (and show in coverage).
-    init(store: ScoreStore, room: PanelRoom, onSizeChange: @escaping (CGSize) -> Void = { _ in }) {
-        self.store = store
-        self.room = room
-        self.onSizeChange = onSizeChange
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -28,8 +46,7 @@ struct ContentView: View {
             case .teams: TeamPicker(store: store, maxHeight: room.maxListHeight - 64)
             case .scores: watchedList
             }
-            // "Updated 11:28" means nothing with no matches picked.
-            if store.followingAnything || mode != .scores || store.error != nil { footer }
+            if Self.showsFooter(store, mode: mode) { footer }
         }
         .padding(12)
         .frame(width: Theme.panelWidth)
@@ -44,7 +61,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 4) {
-            Text(title)
+            Text(mode.title)
                 .font(.system(size: Theme.titleSize, weight: .semibold, design: .rounded))
             Spacer()
             if mode != .scores {
@@ -79,14 +96,6 @@ struct ContentView: View {
         .frame(height: 24)
     }
 
-    private var title: String {
-        switch mode {
-        case .scores: "Cricket"
-        case .matches: "Pick matches"
-        case .teams: "Favourite teams"
-        }
-    }
-
     private func refreshNow() async {
         refreshing = true
         if !reduceMotion { withAnimation(.linear(duration: 0.6)) { spin += 360 } }
@@ -94,43 +103,68 @@ struct ContentView: View {
         refreshing = false
     }
 
-    @ViewBuilder
-    private var watchedList: some View {
-        let items = store.watchedMatches
+    static func listContent(_ store: ScoreStore) -> ListContent {
         if !store.followingAnything {
-            EmptyStateView(
+            return .empty(EmptyState(
                 symbol: "figure.cricket",
                 title: "No matches yet",
                 message: store.favourites.isEmpty
                     ? "Pick the games you want to follow, or star your favourite teams, and their scores will show here."
                     : "Pick the games you want to follow. Your teams' games are at the top of the list.",
-                action: ("Pick matches", { mode = .matches })
+                offersPicker: true))
+        }
+        if store.lastUpdated == nil && store.error == nil {
+            return .loading(placeholders: min(max(store.watched.count + (store.autoWatchingTeams ? 1 : 0), 1), 2))
+        }
+        if !store.watchedMatches.isEmpty { return .cards }
+        if store.lastUpdated == nil {
+            return .empty(EmptyState(symbol: "wifi.slash", title: "Can't reach the score feed",
+                                     message: "Will keep trying every few seconds.", offersPicker: false))
+        }
+        return .empty(EmptyState(
+            symbol: "calendar.badge.clock",
+            title: "Nothing on right now",
+            message: !store.autoWatchingTeams
+                ? "Your picked matches aren't in the feed at the moment."
+                : store.matches.contains(where: store.hasFavourite)
+                    ? "You've stopped watching your teams' matches."
+                    : "None of your teams are playing right now.",
+            offersPicker: true))
+    }
+
+    // "Updated 11:28" means nothing with no matches picked.
+    static func showsFooter(_ store: ScoreStore, mode: Mode) -> Bool {
+        store.followingAnything || mode != .scores || store.error != nil
+    }
+
+    static func footerText(error: String?, lastUpdated: Date?) -> String {
+        if error != nil { return lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline" }
+        if let t = lastUpdated { return "Updated \(short(t))" }
+        return "Fetching scores"
+    }
+
+    @ViewBuilder
+    private var watchedList: some View {
+        switch Self.listContent(store) {
+        case .empty(let empty):
+            EmptyStateView(
+                symbol: empty.symbol,
+                title: empty.title,
+                message: empty.message,
+                action: empty.offersPicker ? ("Pick matches", { mode = .matches }) : nil,
+                tint: empty.offersPicker ? .accentColor : Theme.meta
             )
-        } else if store.lastUpdated == nil && store.error == nil {
+        case .loading(let placeholders):
             VStack(spacing: 10) {
-                ForEach(0..<min(max(store.watched.count + (store.autoWatchingTeams ? 1 : 0), 1), 2), id: \.self) { _ in SkeletonCard() }
+                ForEach(0..<placeholders, id: \.self) { _ in SkeletonCard() }
             }
             .frame(maxHeight: room.maxListHeight, alignment: .top)
             .clipped()
-        } else if items.isEmpty {
-            EmptyStateView(
-                symbol: store.lastUpdated == nil ? "wifi.slash" : "calendar.badge.clock",
-                title: store.lastUpdated == nil ? "Can't reach the score feed" : "Nothing on right now",
-                message: store.lastUpdated == nil
-                    ? "Will keep trying every few seconds."
-                    : !store.autoWatchingTeams
-                        ? "Your picked matches aren't in the feed at the moment."
-                        : store.matches.contains(where: store.hasFavourite)
-                            ? "You've stopped watching your teams' matches."
-                            : "None of your teams are playing right now.",
-                action: store.lastUpdated == nil ? nil : ("Pick matches", { mode = .matches }),
-                tint: store.lastUpdated == nil ? Theme.meta : .accentColor
-            )
-        } else {
+        case .cards:
             // Scrolls only once the cards would be taller than the screen allows.
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(items) { match in
+                    ForEach(store.watchedMatches) { match in
                         MatchCard(match: match, detail: store.details[match.id],
                                   statsOpen: store.statsOpen.contains(match.id),
                                   toggleStats: { store.toggleStats(match) })
@@ -149,18 +183,17 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 5) {
+            let text = Self.footerText(error: store.error, lastUpdated: store.lastUpdated)
             if let err = store.error {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.pausedInk)
-                Text(store.lastUpdated.map { "Offline · last update \(short($0))" } ?? "Offline")
+                Text(text)
                     .foregroundStyle(Theme.pausedInk)
                     .help(err)
                     .accessibilityHint(err)
-            } else if let t = store.lastUpdated {
-                Text("Updated \(short(t))")
             } else {
-                ProgressView().controlSize(.mini)
-                Text("Fetching scores")
+                if store.lastUpdated == nil { ProgressView().controlSize(.mini) }
+                Text(text)
             }
             Spacer()
         }
@@ -172,7 +205,7 @@ struct ContentView: View {
 
     private var scrolls: Bool { listHeight > room.maxListHeight }
 
-    private func short(_ d: Date) -> String {
+    static func short(_ d: Date) -> String {
         d.formatted(date: .omitted, time: .shortened)
     }
 }
@@ -257,11 +290,11 @@ struct MatchCard: View {
         .accessibilityLabel([match.fullDescription.isEmpty ? title : match.fullDescription, match.stateLabel].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
-    private var title: String {
+    var title: String {
         match.detail.isEmpty ? match.league : match.detail + dayNight
     }
 
-    private var secondLine: String {
+    var secondLine: String {
         let league = match.detail.isEmpty ? "" : match.league
         if phase == .upcoming, !date.isEmpty {
             return [date, league].filter { !$0.isEmpty }.joined(separator: "  ·  ")
@@ -271,17 +304,17 @@ struct MatchCard: View {
 
     // Ball-by-ball extras only while the match is in play (live or a break).
     // Hidden as soon as a new innings starts, so last innings' players never sit under the new score.
-    private var liveDetail: LiveDetail? {
+    var liveDetail: LiveDetail? {
         match.isLive && detail?.period == match.period ? detail : nil
     }
 
     // "Australia need 126 runs in 63 balls." beats the feed's shorter summary.
-    private var summaryText: String {
+    var summaryText: String {
         liveDetail?.chase ?? match.summary
     }
 
     // Results and live play read as headline text; toss news and start times stay quiet.
-    private var summaryStrong: Bool {
+    var summaryStrong: Bool {
         switch phase {
         case .finished: true
         case .live, .paused: !match.summary.localizedCaseInsensitiveContains("won toss") || liveDetail?.chase != nil
@@ -291,7 +324,7 @@ struct MatchCard: View {
 
     // "3rd ODI (D/N), England tour of Australia at Hobart, Nov 18 2026"
     //  -> dayNight " (D/N)", venue "Hobart, Nov 18 2026".
-    private var dayNight: String {
+    var dayNight: String {
         let full = match.fullDescription
         guard full.hasPrefix(match.detail) else { return "" }
         let rest = full.dropFirst(match.detail.count)
@@ -299,24 +332,24 @@ struct MatchCard: View {
         return String(rest[...close])
     }
 
-    private var venue: String {
+    var venue: String {
         guard let r = match.fullDescription.range(of: " at ", options: .backwards) else { return "" }
         return String(match.fullDescription[r.upperBound...])
     }
 
     // "Hobart, Nov 18 2026" -> city "Hobart", date "Nov 18 2026". No comma: all of it is the city.
-    private var city: String {
+    var city: String {
         guard let comma = venue.firstIndex(of: ",") else { return venue }
         return String(venue[..<comma])
     }
 
-    private var date: String {
+    var date: String {
         guard let comma = venue.firstIndex(of: ",") else { return "" }
         return venue[venue.index(after: comma)...].trimmingCharacters(in: .whitespaces)
     }
 
     // Best guess: in live play, the only side whose score has overs in brackets is batting.
-    private var battingSide: Match.Side? {
+    var battingSide: Match.Side? {
         guard phase == .live || (phase == .paused && !match.stateLabel.localizedCaseInsensitiveContains("innings")) else { return nil }
         let withOvers = match.sides.filter { !ScoreParts($0.score).detail.isEmpty }
         return withOvers.count == 1 ? withOvers[0] : nil
