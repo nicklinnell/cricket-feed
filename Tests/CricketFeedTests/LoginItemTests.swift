@@ -121,6 +121,21 @@ struct LoginItemFailure: LocalizedError {
         #expect(d.loginMenuItem.state == .mixed)
     }
 
+    // macOS throws "already registered" / "not registered" when it's already where we want it.
+    @Test func throwThatStillGetsThereIsNotAnError() {
+        let (d, errors) = makeDelegate()
+        fake.failure = LoginItemFailure()
+        fake.stateOnFailure = .on
+        d.toggleLoginItem()
+        #expect(d.loginMenuItem.state == .on)
+        #expect(fake.settingsOpened == 0)
+
+        fake.stateOnFailure = .off
+        d.toggleLoginItem()
+        #expect(d.loginMenuItem.state == .off)
+        #expect(errors().isEmpty)
+    }
+
     @Test func failureShowsErrorAndLeavesTickAlone() {
         let (d, errors) = makeDelegate()
         fake.failure = LoginItemFailure()
@@ -151,7 +166,9 @@ struct LoginItemFailure: LocalizedError {
         #expect(installed("/Applications/CricketFeed.app"))
         #expect(installed("/Users/someone/Applications/CricketFeed.app"))
         #expect(!installed("/Users/someone/repo/build/CricketFeed.app"))
-        #expect(!installed("/Applications/Tools/CricketFeed.app"))
+        #expect(installed("/Applications/Tools/CricketFeed.app"))
+        #expect(installed("/Applications/CricketFeed.app/"))
+        #expect(!installed("/ApplicationsOld/CricketFeed.app"))
         #expect(!installed("/Applications/CricketFeed"))
         #expect(!installed("/Users/other/Applications/CricketFeed.app"))
 

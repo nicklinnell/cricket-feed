@@ -143,7 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func toggleLoginItem() {
         switch loginItem.state {
         case .on:
-            do { try loginItem.set(false) } catch { showError(error.localizedDescription) }
+            // An error doesn't matter if it ended up off anyway (macOS says "not registered").
+            do { try loginItem.set(false) } catch { if loginItem.state != .off { showError(error.localizedDescription) } }
         case .needsApproval:
             // Waiting on the user, so take them to where they allow it.
             loginItem.openSettings()
@@ -153,8 +154,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // macOS can hold it until the user allows it, and may not say so straight away.
                 if loginItem.state != .on { loginItem.openSettings() }
             } catch {
-                // macOS can also throw when the user has to allow it first.
-                if loginItem.state == .needsApproval { loginItem.openSettings() } else { showError(error.localizedDescription) }
+                switch loginItem.state {
+                case .on: break  // macOS says "already registered"
+                case .needsApproval: loginItem.openSettings()  // or that the user has to allow it
+                case .off: showError(error.localizedDescription)
+                }
             }
         }
         updateLoginMenuItem()

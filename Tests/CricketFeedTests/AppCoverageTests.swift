@@ -14,7 +14,7 @@ extension NetworkTests {
 
         // A delegate on a throwaway defaults suite. Keep `temp` alive as long as the delegate.
         func makeDelegate(_ temp: TempDefaults) -> AppDelegate {
-            AppDelegate(store: ScoreStore(defaults: temp.defaults))
+            AppDelegate(store: ScoreStore(defaults: temp.defaults), loginItem: FakeLoginItem())
         }
 
         // Waits until the store's first refresh fails (no stub routes), proving start() ran.
@@ -75,8 +75,7 @@ extension NetworkTests {
             let menu = try #require(item.menu)
             #expect(menu.items.map(\.title) == ["Show / Hide Scores", "Open at Login", "", "Quit"])
             #expect(menu.items[0].action == #selector(AppDelegate.togglePanel))
-            // swift test isn't the installed app, so the item is greyed out.
-            #expect(menu.items[1].action == nil)
+            #expect(menu.items[1].action == #selector(AppDelegate.toggleLoginItem))
             #expect(menu.items[1].state == .off)
             #expect(menu.items[2].isSeparatorItem)
             #expect(menu.items[3].action == #selector(NSApplication.terminate(_:)))

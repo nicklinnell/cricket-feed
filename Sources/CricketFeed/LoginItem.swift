@@ -49,11 +49,11 @@ final class SystemLoginItem: LoginItem {
         isInstalled(Bundle.main.bundleURL) ? SystemLoginItem() : NoLoginItem()
     }
 
-    // Only an app in an Applications folder. A build folder gets wiped on the next build,
-    // so a login item pointing there would break.
+    // Only an app somewhere in an Applications folder. A build folder gets wiped on the
+    // next build, so a login item pointing there would break.
     static func isInstalled(_ url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
-        let folder = url.deletingLastPathComponent().standardizedFileURL.path
-        return url.pathExtension == "app"
-            && (folder == "/Applications" || folder == home.appendingPathComponent("Applications").standardizedFileURL.path)
+        let path = url.standardizedFileURL.path
+        let roots = ["/Applications", home.appendingPathComponent("Applications").standardizedFileURL.path]
+        return url.pathExtension == "app" && roots.contains { path.hasPrefix($0 + "/") }
     }
 }
