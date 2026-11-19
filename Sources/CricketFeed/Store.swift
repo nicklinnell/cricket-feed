@@ -113,9 +113,10 @@ final class ScoreStore: ObservableObject {
 
     // Ends the refresh loop and waits until it has finished.
     func stop() async {
-        loop?.cancel()
-        await loop?.value
+        let old = loop
         loop = nil
+        old?.cancel()
+        await old?.value
     }
 
     func refresh() async {

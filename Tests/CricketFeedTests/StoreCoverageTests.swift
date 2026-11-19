@@ -254,11 +254,14 @@ extension NetworkTests {
             await s.stop()
             #expect(panelRequests() == 2)
             try? await Task.sleep(nanoseconds: (s.refreshSeconds * 1_000_000_000) + 1_000_000_000)
-            #expect(panelRequests() == 2)
+            // Keep the store alive through the wait, so an old loop would still fetch.
+            withExtendedLifetime(s) {
+                #expect(panelRequests() == 2)
+            }
         }
 
-        // The loop holds the store weakly and ends once the store is freed.
-        @Test func loopEndsWhenStoreIsFreed() async {
+        // The loop doesn't keep the store alive, and a freed store fetches nothing.
+        @Test func loopDoesNotKeepStoreAlive() async {
             StubURLProtocol.reset()
             StubURLProtocol.on(prefix: panelPrefix, json: panel([event("m1")]))
             weak var weakStore: ScoreStore?
