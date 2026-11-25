@@ -15,6 +15,13 @@ import Testing
         #expect(m.isLive == live)
     }
 
+    // ESPN sends an empty 200 without these, which looks like the feed going offline.
+    @Test func scorePanelURLAsksForLanguageAndRegion() throws {
+        let items = try #require(URLComponents(url: scorePanelURL, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.contains(URLQueryItem(name: "lang", value: "en")))
+        #expect(items.contains(URLQueryItem(name: "region", value: "gb")))
+    }
+
     @Test func badStatusDescribesHTTPCode() {
         let error: Error = FeedError.badStatus(503)
         #expect(error.localizedDescription == "Feed returned HTTP 503")

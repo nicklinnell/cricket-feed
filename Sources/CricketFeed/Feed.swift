@@ -1,7 +1,8 @@
 import Foundation
 
 // Unofficial ESPN feed (ESPN owns Cricinfo). No key needed. May change without notice.
-let scorePanelURL = URL(string: "https://site.api.espn.com/apis/site/v2/sports/cricket/scorepanel")!
+// Since Nov 2026 it returns an empty 200 without lang/region, so keep the query.
+let scorePanelURL = URL(string: "https://site.api.espn.com/apis/site/v2/sports/cricket/scorepanel?lang=en&region=gb")!
 
 // MARK: - Raw JSON shapes (only the fields we use)
 
